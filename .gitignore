@@ -1,0 +1,6 @@
+*.exe
+test/
+mem.out
+debug.dlv
+*.sublime-project
+*.sublime-workspace
