@@ -8,7 +8,7 @@ import (
     "log"
     "bytes"
     // "bufio"
-    "html"
+    // "html"
     "strings"
     // "unicode"
     // "unicode/utf8"
@@ -26,6 +26,7 @@ type tagNesting struct {
 type parser struct {
     tokens []byte
     i int
+    ln int
 }
 
 type renderer struct {
@@ -72,9 +73,23 @@ var tags = [...]tag {
     tagPre:  tag{open: []byte("<pre>"), close: []byte("</pre>")},
 }
 
+var entities = map[int8][]byte {
+    '&':  []byte{'&','a','m','p',';'},
+    '\'': []byte{'&','#','3','9',';'},
+    '<':  []byte{'&','l','t',';'},
+    '>':  []byte{'&','l','t',';'},
+    '"':  []byte{'&','#','3','4',';'},
+}
+
 var stack = make([]tagNesting, 0, 254)
 // var builder strings.Builder
 var builder bytes.Buffer
+var ubuf bytes.Buffer
+
+func init() {
+    ubuf.Grow(1024*8)
+    builder.Grow(1024*8)
+}
 
 func ConvertString(s *strings.Reader) []byte {
     builder.Reset()
@@ -87,7 +102,7 @@ func ConvertFile(f *os.File) []byte {
     builder.Reset()
     fi, err := f.Stat()
     if err != nil {
-        log.Fatal(err)
+        log.Fatalf("stat error: %s", err)
     }
     builder.Grow(int(fi.Size() * 2))
     parser := parser{tokens:Tokenize(f, int(fi.Size() * 2))}
@@ -105,6 +120,17 @@ func (r *renderer) writeByte(by byte) {
 
 func (r *renderer) write(by []byte) {
     r.b.Write(by)
+}
+
+func (r *renderer) writeEntityEscaped(b []byte) {
+    for _, c := range b {
+        switch c {
+        case '&', '\'',  '<', '>', '"': 
+            r.b.Write(entities[int8(c)])
+        default:
+            r.b.WriteByte(c)
+        }
+    }
 }
 
 func (r *renderer) open(t int8, level int8) {
@@ -150,12 +176,11 @@ func (r *renderer) getTagNestingLevel(t int8) int8 {
     return 0
 }
 
-
 func (p *parser) current() byte {
-    if p.i < len(p.tokens) {
-        return p.tokens[p.i]
+    if p.i > p.ln {
+        return 0
     }
-    return 0
+    return p.tokens[p.i]
 }
 
 func (p *parser) accept(ch byte) bool {
@@ -201,6 +226,7 @@ func (p *parser) count(ch byte) int {
 }
 
 func (p *parser) parse(r *renderer) {
+    p.ln = len(p.tokens) - 1
     /*
     todo:
     - links, references, footnotes
@@ -216,7 +242,8 @@ func (p *parser) parse(r *renderer) {
     var indentation int8 = 0
     var startOfLine bool = true
     var startOfBlock bool = true
-    for p.current() != 0 {
+
+    for p.i <= p.ln {
 
         if p.current() == '\n' {
             p.skip(1)
@@ -243,18 +270,19 @@ func (p *parser) parse(r *renderer) {
         switch {
         case startOfBlock && p.peek() == '-':
             p.skip(1)
-            bb:=[]byte{}
+            ubuf.Reset()
             for range p.count('-') - 1 {
-                bb = append(bb, p.current())
+                ubuf.WriteByte(p.current())
                 p.skip(1)
             }
             if p.peek() == '\n' {
                 r.write(tags[tagHr].close)
                 r.writeByte(byte('\n'))
             } else {
-                bb = append(bb, p.current())
+                ubuf.WriteByte(p.current())
+                // bb = append(bb, p.current())
                 r.open(tagP, indentation)
-                r.write(bb)
+                r.write(ubuf.Bytes())
             }
             p.skip(1)
         case startOfBlock && p.peek() == '#':
@@ -277,15 +305,15 @@ func (p *parser) parse(r *renderer) {
             }
             r.write(tags[tagPre].open)
             r.write(tags[tagCode].open)
-            s := []byte{}
+            ubuf.Reset()
             for p.current() != 0 && string(p.peekSlice(3)) != "```" {
-                s = append(s, p.current())
+                ubuf.WriteByte(p.current())
                 p.skip(1)
             }
             if p.current() != 0 {
-                s = append(s, p.current())
+                ubuf.WriteByte(p.current())
             }
-            r.writeString(html.EscapeString(string(s)))
+            r.writeEntityEscaped(ubuf.Bytes())
             r.write(tags[tagCode].close)
             r.write(tags[tagPre].close)
             r.writeByte('\n')
@@ -331,10 +359,10 @@ func (p *parser) parse(r *renderer) {
         case p.current() == '`':
             p.skip(1)
             r.write(tags[tagCode].open)
-            s := []byte{}
+            ubuf.Reset()
             for p.current() != '`' {
                 if p.current() != '\n' {
-                    s = append(s, p.current())
+                    ubuf.WriteByte(p.current())
                 }
                 if p.current() == '\n' && (p.peek() == '\n' || p.peek() == 0) {
                     p.skip(1)
@@ -342,7 +370,7 @@ func (p *parser) parse(r *renderer) {
                 }
                 p.skip(1)
             }
-            r.writeString(html.EscapeString(string(s)))
+            r.writeEntityEscaped(ubuf.Bytes())
             r.write(tags[tagCode].close)
             p.skip(1)
         case p.current() == '*' && p.peek() == '*':

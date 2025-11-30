@@ -1,6 +1,7 @@
 *.exe
 test/
 mem.out
+cpu.prof
 debug.dlv
 *.sublime-project
 *.sublime-workspace

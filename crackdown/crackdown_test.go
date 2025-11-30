@@ -1,20 +1,29 @@
 package crackdown
 
 import (
-    "testing"
-    // "bytes"
-    "strings"
-    // "bufio"
     "io"
+    "os"
+    // "fmt"
+    "log"
+    "bytes"
+    "testing"
+    "strings"
+
+    // "time"
+    "math/rand/v2"
 )
 
-
-// func init() {
-// }
-// var out = bytes.Buffer{}
-// var out *bufio.Writer = bufio.NewWriter(strings.Writer)
-
+var fileData string
 var rdr strings.Reader
+
+func init(){
+    data, err := os.ReadFile("../crackdown.crackdown")
+    if err != nil {
+        log.Fatalf("os.ReadFile error: %q", err)
+    }
+    fileData = string(data)
+}
+
 func doConvertString(in string) string {
     rdr.Reset(in)
     return strings.Trim(string(ConvertString(&rdr)), "\n")
@@ -26,7 +35,25 @@ func doConvertStringDiscard(in string) {
     io.Discard.Write(s)
 }
 
+var buf bytes.Buffer 
+func doConvertFileDiscardBogus() {
+    rdr.Reset(fileData + string([]byte{byte(rand.IntN(100))}))
+    // rdr.Reset(fileData + time.Now().UTC().Format("2006-01-02 CET"))
+    buf.Reset()
+    buf.ReadFrom(&rdr)
+    // s:=ConvertString(&rdr)
+    io.Discard.Write(buf.Bytes())
+}
+
+func doConvertFileDiscard() {
+    rdr.Reset(fileData)
+    s:=ConvertString(&rdr)
+    io.Discard.Write(s)
+}
+
+
 func TestInlineMarkupBasic(t *testing.T) {
+
     cases := []struct {
         in, want string
     }{
@@ -170,16 +197,28 @@ func TestBugOrFeature(t *testing.T) {
 }
 
 
-func BenchmarkList(b *testing.B) {
+// func BenchmarkList(b *testing.B) {
+//     for b.Loop() {
+//         mu:="* a\n\t* b\n\t\t* c"
+//         doConvertStringDiscard(mu)
+//     }
+// }
+
+// func BenchmarkList2(b *testing.B) {
+//     for b.Loop() {
+//         mu := "* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c"
+//         doConvertStringDiscard(mu)
+//     }
+// }
+
+func BenchmarkFileBase(b *testing.B) {
     for b.Loop() {
-        mu:="* a\n\t* b\n\t\t* c"
-        doConvertStringDiscard(mu)
+        doConvertFileDiscardBogus()
     }
 }
 
-func BenchmarkList2(b *testing.B) {
+func BenchmarkFile(b *testing.B) {
     for b.Loop() {
-        mu := "* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c"
-        doConvertStringDiscard(mu)
+        doConvertFileDiscard()
     }
 }
