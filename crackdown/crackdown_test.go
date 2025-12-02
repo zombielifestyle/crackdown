@@ -107,9 +107,6 @@ func TestBlockMarkupBasic(t *testing.T) {
         {"#**h1b**", "<h1><b>h1b</b></h1>"},
         {"* ul", "<ul><li> ul</li></ul>"},
         {"> bq", "<blockquote> bq</blockquote>"},
-        // {"```\n__verbatim__```", "<pre><code>__verbatim__</code></pre>"},
-        // {"```code```", "<pre><code>code</code></pre>"},
-        // {"```close on EOF", "<pre><code>close on EOF\n\n</code></pre>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)

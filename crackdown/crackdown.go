@@ -243,6 +243,7 @@ func (p *parser) parse(r *renderer) {
     - blockquote nesting
     - header right hand side decorations?
     - not sure how to handle newlines in `code`
+    - test direct asciiset use
     */
     var indentation int8 = 0
     var startOfLine bool = true
@@ -309,20 +310,17 @@ func (p *parser) parse(r *renderer) {
             }
             r.write(tags[tagPre].open)
             r.write(tags[tagCode].open)
-            ubuf.Reset()
-            for p.current() != 0 && string(p.peekSlice(3)) != "```" {
-                ubuf.WriteByte(p.current())
-                p.skip(1)
+            o := bytes.Index(p.tokens[p.i:], []byte("```"))
+            if o > -1 {
+                r.writeEntityEscaped(p.tokens[p.i:p.i+o])
+                p.skip(o+3)
+            } else {
+                r.writeEntityEscaped(p.tokens[p.i:])
+                p.i = p.ln
             }
-            if p.current() != 0 {
-                ubuf.WriteByte(p.current())
-                // p.skip(1)
-            }
-            r.writeEntityEscaped(ubuf.Bytes())
             r.write(tags[tagCode].close)
             r.write(tags[tagPre].close)
             r.writeByte('\n')
-            p.skip(4)
             if p.current() == '\n' {
                 p.skip(1)
             }
@@ -389,7 +387,7 @@ func (p *parser) parse(r *renderer) {
             r.openOrClose(tagS, indentation)
         default:
             i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
-            if i < 2 || p.i + 1 >= len(p.tokens){
+            if i < 2 || p.i + 1 > p.ln {
                 r.writeByte(p.current())
                 p.skip(1)
             } else {
@@ -399,9 +397,7 @@ func (p *parser) parse(r *renderer) {
             }
         }
     }
-    for len(r.stack) > 0{
-        r.closeAll()
-    }
+    r.closeAll()
 }
 
 func isLetter(c byte) bool {
