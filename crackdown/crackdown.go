@@ -11,7 +11,7 @@ import (
     // "html"
     "strings"
     // "unicode"
-    // "unicode/utf8"
+    "unicode/utf8"
 )
 
 type tag struct {
@@ -81,6 +81,8 @@ var entities = map[int8][]byte {
     '"':  []byte{'&','#','3','4',';'},
 }
 
+var myass asciiSet
+
 var stack = make([]tagNesting, 0, 254)
 // var builder strings.Builder
 var builder bytes.Buffer
@@ -89,6 +91,11 @@ var ubuf bytes.Buffer
 func init() {
     ubuf.Grow(1024*8)
     builder.Grow(1024*8)
+    isASCII:=false
+    myass, isASCII = makeASCIISet("\n*_~-`#>")
+    if !isASCII {
+        log.Fatal("asciiset failed")
+    }
 }
 
 func ConvertString(s *strings.Reader) []byte {
@@ -189,7 +196,7 @@ func (p *parser) current() byte {
 }
 
 func (p *parser) accept(ch byte) bool {
-    if p.i < len(p.tokens) && p.tokens[p.i] == ch {
+    if p.i <= p.ln && p.tokens[p.i] == ch {
         p.i++
         return true
     }
@@ -197,7 +204,7 @@ func (p *parser) accept(ch byte) bool {
 }
 
 func (p *parser) peek() byte {
-    if p.i + 1 < len(p.tokens) {
+    if p.i + 1 <= p.ln {
         return p.tokens[p.i+1]
     }
     return 0
@@ -211,7 +218,7 @@ func (p *parser) peekSlice(n int) []byte {
     i := p.i + 1
     if i > len(p.tokens) {
         return p.tokens[:0]
-    } else if i+n >= len(p.tokens) {
+    } else if i+n >= p.ln {
         return p.tokens[i:]
     }
     return p.tokens[i:i+n]
@@ -222,7 +229,7 @@ func (p *parser) back() {
 }
 
 func (p *parser) count(ch byte) int {
-    for i:=p.i; i < len(p.tokens); i++ {
+    for i:=p.i; i <= p.ln; i++ {
         if p.tokens[i] != ch {
             return i - p.i
         }
@@ -234,6 +241,8 @@ func (p *parser) parse(r *renderer) {
     p.ln = len(p.tokens) - 1
     /*
     todo:
+    - optimize entity escaping
+    - how to reduce bounds checks?
     - links, references, footnotes
     - ordered lists
     - entities
@@ -243,7 +252,6 @@ func (p *parser) parse(r *renderer) {
     - blockquote nesting
     - header right hand side decorations?
     - not sure how to handle newlines in `code`
-    - test direct asciiset use
     */
     var indentation int8 = 0
     var startOfLine bool = true
@@ -386,7 +394,8 @@ func (p *parser) parse(r *renderer) {
             p.skip(2)
             r.openOrClose(tagS, indentation)
         default:
-            i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
+            // i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
+            i:=indexAnyFast(p.tokens[p.i:], myass)
             if i < 2 || p.i + 1 > p.ln {
                 r.writeByte(p.current())
                 p.skip(1)
@@ -407,4 +416,31 @@ func isLetter(c byte) bool {
     return false
     // r, _ := utf8.DecodeRuneInString(s)
     // return unicode.IsLetter(r)
+}
+
+// stolen from bytes.IndexAny to use an persistent asciiSet
+func indexAnyFast(s []byte, as asciiSet) int {
+    for i, c := range s {
+        if as.contains(c) {
+            return i
+        }
+    }
+    return -1
+}
+
+type asciiSet [8]uint32
+
+func (as *asciiSet) contains(c byte) bool {
+    return (as[c/32] & (1 << (c % 32))) != 0
+}
+
+func makeASCIISet(chars string) (as asciiSet, ok bool) {
+    for i := 0; i < len(chars); i++ {
+        c := chars[i]
+        if c >= utf8.RuneSelf {
+            return as, false
+        }
+        as[c/32] |= 1 << (c % 32)
+    }
+    return as, true
 }
