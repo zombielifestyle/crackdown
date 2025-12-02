@@ -181,6 +181,11 @@ func (p *parser) current() byte {
         return 0
     }
     return p.tokens[p.i]
+
+    // if p.i <= p.ln {
+    //     return p.tokens[p.i]
+    // }
+    // return 0
 }
 
 func (p *parser) accept(ch byte) bool {
@@ -243,7 +248,7 @@ func (p *parser) parse(r *renderer) {
     var startOfLine bool = true
     var startOfBlock bool = true
 
-    for p.i <= p.ln {
+    for p.i < p.ln {
 
         if p.current() == '\n' {
             p.skip(1)
@@ -280,7 +285,6 @@ func (p *parser) parse(r *renderer) {
                 r.writeByte(byte('\n'))
             } else {
                 ubuf.WriteByte(p.current())
-                // bb = append(bb, p.current())
                 r.open(tagP, indentation)
                 r.write(ubuf.Bytes())
             }
@@ -312,6 +316,7 @@ func (p *parser) parse(r *renderer) {
             }
             if p.current() != 0 {
                 ubuf.WriteByte(p.current())
+                // p.skip(1)
             }
             r.writeEntityEscaped(ubuf.Bytes())
             r.write(tags[tagCode].close)
@@ -382,11 +387,16 @@ func (p *parser) parse(r *renderer) {
         case p.current() == '~' && p.peek() == '~':
             p.skip(2)
             r.openOrClose(tagS, indentation)
-        // case p.current() == '\n':
-        //     p.skip(1)
         default:
-            r.writeByte(p.current())
-            p.skip(1)
+            i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
+            if i < 2 || p.i + 1 >= len(p.tokens){
+                r.writeByte(p.current())
+                p.skip(1)
+            } else {
+                r.write(p.tokens[p.i:p.i+i])
+                // r.writeByte(p.current())
+                p.skip(i)
+            }
         }
     }
     for len(r.stack) > 0{

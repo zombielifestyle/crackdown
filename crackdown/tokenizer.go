@@ -2,7 +2,8 @@ package crackdown
 
 import (
     "io"
-    // "fmt"
+    "fmt"
+    "log"
     "sync"
     "bytes"
 )
@@ -19,6 +20,13 @@ type tokenizer struct {
     eof bool
 }
 
+func init() {
+    if false {
+        fmt.Print("")
+        log.Fatal("")
+    }
+}
+
 func Tokenize(r io.Reader, l int) []byte {
     buf:= bufPool.Get().(*bytes.Buffer)
     buf.Reset()
@@ -27,11 +35,12 @@ func Tokenize(r io.Reader, l int) []byte {
 
     tok:= bufPool.Get().(*bytes.Buffer)
     tok.Reset()
-    tok.Grow(max(128,l))
+    tok.Grow(max(128,l*2))
     t:=tok.Bytes()
 
     tokenizer := tokenizer{buf: buf.Bytes()}
     out := tokenizer.tokenize(t[0:cap(t)])
+    // out := tokenizer.tokenize(t[:0])
 
     bufPool.Put(buf)
     bufPool.Put(tok)
@@ -40,77 +49,98 @@ func Tokenize(r io.Reader, l int) []byte {
 }
 
 func (t *tokenizer) tokenize(tokens []byte) []byte {
-    var (
-        lineStart bool = true
-        idx int = 0
-    )
+
+    t.buf = bytes.Trim(t.buf, "\r\n")
+    if len(t.buf) < 1 {
+        return tokens[:0]
+    }
+
+    // dst := t.buf[:0]
+    // src := t.buf[0:]
+    // for {
+    //     s:=bytes.IndexByte(src, '\r')
+    //     if s < 0 {
+    //         dst = append(dst, src...)
+    //         break
+    //     }
+    //     // e:=bytes.IndexByte(src, '\r')
+    //     dst = append(dst, src[:s]...)
+    //     // for i:=0; i < len(src);
+    //     src = src[s+1:]
+    // }
+    // t.buf = dst
+
+    // b := t.buf[:0]
+    // for _, x := range t.buf {
+    //     if x != '\r' {
+    //         b = append(b, x)
+    //     }
+    // }
+    // t.buf = b
     
-    tokens[idx] = '\n'
-    idx++
-    tokens[idx] = '\n'
-    idx++
-    for t.read() == '\n' {}
-    t.unread()
+    tokens[0] = '\n'
+    tokens[1] = '\n'
 
-    for {
-        c := t.read()
-        if t.eof {
-            break
-        }
+    r:=0
+    w:=2
+    m:=len(t.buf)
+    // for ; r < m && (t.buf[r] == '\n' || t.buf[r] == '\r'); r++ {}
 
-        if c == '\n' {
-            tokens[idx] = '\n'
-            idx++
-            i := 1
-            for {
-                c := t.read()
-                if c != '\n' {
-                    t.unread()
-                    break
-                }
-                if i < 2 {
-                    tokens[idx] = '\n'
-                    idx++
-                    i++
-                } 
-            }
-            lineStart = c == byte('\n')
-        } else if lineStart && (c == ' ' || c == '\t') {
-            t.unread()
-            cnt:=0
-            for {
-                c := t.read()
-                if c == byte(' ') {
-                    cnt++
-                } else if c == byte('\t') {
-                    cnt+=4
+    for r < m {
+        if t.buf[r] == '\n' || t.buf[r] == '\r' {
+            nls:=0
+            for ; r < m; r++ {
+                if t.buf[r] == '\n' {
+                    nls++
+                } else if t.buf[r] == '\r' {
+
                 } else {
-                    t.unread()
                     break
                 }
             }
-            for range cnt/4 {
-                tokens[idx] = '\t'
-                idx++
+            if nls > 1 {
+                tokens[w] = '\n'
+                w++
+                tokens[w] = '\n'
+                w++
+            } else if nls > 0 {
+                tokens[w] = '\n'
+                w++
+            }
+        } else if t.buf[r] == ' ' || t.buf[r] == '\t' {
+            cnt:=0
+            for ; r < m; r++ {
+                if t.buf[r] == '\t' {
+                    cnt += 4
+                } else if t.buf[r] == ' ' {
+                    cnt++
+                } else {
+                    break
+                }
+            }
+            cnt /= 4
+            for ; cnt > 0; cnt-- {
+                tokens[w] = '\t'
+                w++
             }
         } else {
-            lineStart = false
-            tokens[idx] = c
-            idx++
+            o := bytes.IndexByte(t.buf[r:], '\n')
+            if o < 0 || r + o >= m {
+                w += copy(tokens[w:], t.buf[r:])
+                break
+            }
+            if o > 1 && t.buf[r+o-1] == '\r' {
+                o--
+            }
+            w += copy(tokens[w:], t.buf[r:r+o])
+            r += o
         }
     }
-    if idx > 4 {
-        if tokens[idx-1] != byte('\n') {
-            tokens[idx] = '\n'
-            idx++
-            tokens[idx] = '\n'
-            idx++
-        } else if tokens[idx-2] != byte('\n') {
-            tokens[idx] = '\n'
-            idx++
-        }
-    }
-    return tokens[:idx]
+
+    tokens = tokens[:w]
+    tokens = bytes.TrimRight(tokens, "\n")
+    tokens = append(tokens, '\n', '\n')
+    return tokens
 }
 
 func (t *tokenizer) read() byte {

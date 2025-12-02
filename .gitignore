@@ -5,3 +5,5 @@ cpu.prof
 debug.dlv
 *.sublime-project
 *.sublime-workspace
+*.png
+

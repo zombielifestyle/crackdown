@@ -51,6 +51,23 @@ func doConvertFileDiscard() {
     io.Discard.Write(s)
 }
 
+func TestWhitespace(t *testing.T) {
+    cases := []struct {
+        in, want string
+    }{
+        {"\r\n\r\npara\r\n\r\n", "<p>para</p>\n"},
+        {"\n\npara\r\nmixed\n\n", "<p>para\nmixed</p>\n"},
+        {"\r\n\r\n\r\n\r\n", ""},
+        {"\n\n\t\n\t\n\n", "\t\t\n"},
+    }
+    for _, c := range cases {
+        rdr.Reset(c.in)
+        got := string(ConvertString(&rdr))
+        if got != c.want {
+            t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
+        }
+    }
+}
 
 func TestInlineMarkupBasic(t *testing.T) {
 
@@ -117,23 +134,6 @@ func TestCode(t *testing.T) {
         }
     }
     
-}
-
-func TestWhitespace(t *testing.T) {
-    cases := []struct {
-        in, want string
-    }{
-        {"\r\n\r\npara\r\n\r\n", "<p>para</p>"},
-        {"\n\npara\r\nmixed\n\n", "<p>para\nmixed</p>"},
-        {"\r\n\r\n\r\n\r\n", ""},
-        {"\n\n\t\n\t\n\n", "\t\t"},
-    }
-    for _, c := range cases {
-        got := doConvertString(c.in)
-        if got != c.want {
-            t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
-        }
-    }
 }
 
 func TestMultiplineParagraphs(t *testing.T) {
@@ -211,13 +211,13 @@ func TestBugOrFeature(t *testing.T) {
 //     }
 // }
 
-func BenchmarkFileBase(b *testing.B) {
-    for b.Loop() {
-        doConvertFileDiscardBogus()
-    }
-}
+// func BenchmarkFileBase(b *testing.B) {
+//     for b.Loop() {
+//         doConvertFileDiscardBogus()
+//     }
+// }
 
-func BenchmarkFile(b *testing.B) {
+func BenchmarkFileReal(b *testing.B) {
     for b.Loop() {
         doConvertFileDiscard()
     }
