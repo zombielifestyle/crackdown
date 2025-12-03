@@ -73,12 +73,12 @@ var tags = [...]tag {
     tagPre:  tag{open: []byte("<pre>"), close: []byte("</pre>")},
 }
 
-var entities = map[int8][]byte {
-    '&':  []byte{'&','a','m','p',';'},
-    '\'': []byte{'&','#','3','9',';'},
-    '<':  []byte{'&','l','t',';'},
-    '>':  []byte{'&','g','t',';'},
-    '"':  []byte{'&','#','3','4',';'},
+var entities = [256][6]uint8{
+    '&':  {6, '&','a','m','p',';'},
+    '\'': {6, '&','#','3','9',';'},
+    '<':  {5, '&','l','t',';'},
+    '>':  {5, '&','g','t',';'},
+    '"':  {6, '&','#','3','4',';'},
 }
 
 var syntaxAsciiSet asciiSet
@@ -142,7 +142,8 @@ func (r *renderer) writeEntityEscaped(b []byte) {
         i:=indexAnyFast(b, entityAsciiSet)
         if i > -1 {
             r.write(b[:i])
-            r.write(entities[int8(b[i])])
+            j:=int8(b[i])
+            r.write(entities[j][1:entities[j][0]])
             b = b[i+1:]
         } else {
             r.write(b)
@@ -150,17 +151,6 @@ func (r *renderer) writeEntityEscaped(b []byte) {
         }
     }
 }
-
-// func (r *renderer) writeEntityEscaped(b []byte) {
-//     for _, c := range b {
-//         switch c {
-//         case '&', '\'',  '<', '>', '"': 
-//             r.write(entities[int8(c)])
-//         default:
-//             r.writeByte(c)
-//         }
-//     }
-// }
 
 func (r *renderer) open(t int8, level int8) {
     r.write(tags[t].open)
