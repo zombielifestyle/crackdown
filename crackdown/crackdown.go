@@ -332,14 +332,12 @@ func (p *parser) parse(r *renderer) {
             }
             r.write(tags[tagPre].open)
             r.write(tags[tagCode].open)
-            o := bytes.Index(p.tokens[p.i:], []byte("```"))
-            if o > -1 {
-                r.writeEntityEscaped(p.tokens[p.i:p.i+o])
-                p.skip(o+3)
-            } else {
-                r.writeEntityEscaped(p.tokens[p.i:])
-                p.i = p.ln
+            i := bytes.Index(p.tokens[p.i:], []byte("```"))
+            if i < 0 {
+                i = p.ln - p.i + 1
             }
+            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
+            p.skip(i+3)
             r.write(tags[tagCode].close)
             r.write(tags[tagPre].close)
             r.writeByte('\n')
