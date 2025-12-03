@@ -49,18 +49,15 @@ func init() {
 
 var tokenReadBuffer *bytes.Buffer = new(bytes.Buffer)
 var tokenWriteBuffer *bytes.Buffer = new(bytes.Buffer)
-// var tokenWriteBuffer []byte
 
 func Tokenize(r io.Reader, l int) []byte {
-    // buf:= tokenReadBuffer
     tokenReadBuffer.Reset()
     tokenReadBuffer.Grow(max(128, l))
     tokenReadBuffer.ReadFrom(r)
     buf:= tokenReadBuffer.Bytes()
 
-    // twb := tokenWriteBuffer
     tokenWriteBuffer.Reset()
-    tokenWriteBuffer.Grow(max(128, l*2))
+    tokenWriteBuffer.Grow(max(128, l))
     wb:= tokenWriteBuffer.Bytes()
 
     tokenizer := tokenizer{buf: buf}
