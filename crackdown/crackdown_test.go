@@ -11,7 +11,16 @@ import (
 
     // "time"
     "math/rand/v2"
+
+    // "github.com/pkg/profile"
+
 )
+
+
+// func TestMain(m *testing.M) {
+//     defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+//     m.Run()
+// }
 
 var fileData string
 var rdr strings.Reader
@@ -142,7 +151,7 @@ func TestMultiplineParagraphs(t *testing.T) {
         {"multi\n--- para", "<p>multi\n--- para</p>"},
         {"multi\n# para", "<p>multi\n# para</p>"},
         {"multi **li\nne** para", "<p>multi <b>li\nne</b> para</p>"},
-        {"multi `li\nne` para", "<p>multi <code>line</code> para</p>"},
+        {"multi `li\nne` para", "<p>multi <code>li\nne</code> para</p>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)

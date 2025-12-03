@@ -12,7 +12,9 @@ import (
     "strings"
     // "unicode"
     "unicode/utf8"
+
 )
+
 
 type tag struct {
     open []byte
@@ -382,20 +384,13 @@ func (p *parser) parse(r *renderer) {
         case p.current() == '`':
             p.skip(1)
             r.write(tags[tagCode].open)
-            ubuf.Reset()
-            for p.current() != '`' {
-                if p.current() != '\n' {
-                    ubuf.WriteByte(p.current())
-                }
-                if p.current() == '\n' && (p.peek() == '\n' || p.peek() == 0) {
-                    p.skip(1)
-                    break
-                }
-                p.skip(1)
+            i := bytes.Index(p.tokens[p.i:], []byte("`"))
+            if i < 0 {
+                i = len(p.tokens[p.i:])-2
             }
-            r.writeEntityEscaped(ubuf.Bytes())
+            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
             r.write(tags[tagCode].close)
-            p.skip(1)
+            p.skip(i+1)
         case p.current() == '*' && p.peek() == '*':
             r.openOrClose(tagB, indentation)
             p.skip(2)
@@ -406,14 +401,12 @@ func (p *parser) parse(r *renderer) {
             p.skip(2)
             r.openOrClose(tagS, indentation)
         default:
-            // i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
             i:=indexAnyFast(p.tokens[p.i:], syntaxAsciiSet)
             if i < 2 || p.i + 1 > p.ln {
                 r.writeByte(p.current())
                 p.skip(1)
             } else {
                 r.write(p.tokens[p.i:p.i+i])
-                // r.writeByte(p.current())
                 p.skip(i)
             }
         }
