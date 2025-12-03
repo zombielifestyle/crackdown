@@ -30,9 +30,9 @@ type parser struct {
 }
 
 type renderer struct {
-    // b *strings.Builder
-    b *bytes.Buffer
+    buf []byte
     stack []tagNesting
+    w int
 }
 
 const (
@@ -85,13 +85,12 @@ var syntaxAsciiSet asciiSet
 var entityAsciiSet asciiSet
 
 var stack = make([]tagNesting, 0, 254)
-// var builder strings.Builder
-var builder bytes.Buffer
+var renderWriteBuf bytes.Buffer
 var ubuf bytes.Buffer
 
 func init() {
     ubuf.Grow(1024*8)
-    builder.Grow(1024*8)
+    renderWriteBuf.Grow(1024*8)
     isASCII:=false
     syntaxAsciiSet, isASCII = makeASCIISet("\n*_~-`#>")
     if !isASCII {
@@ -104,45 +103,49 @@ func init() {
 }
 
 func ConvertString(s *strings.Reader) []byte {
-    builder.Reset()
+    renderWriteBuf.Reset()
+    renderWriteBuf.Grow(s.Len()*2)
+    rwb:=renderWriteBuf.Bytes()
+    rwb=rwb[0:cap(rwb)]
     parser := parser{tokens:Tokenize(s, s.Len())}
-    parser.parse(&renderer{&builder, stack[:0]})
-    return builder.Bytes()
+    r:=&renderer{rwb, stack[:0], 0}
+    parser.parse(r)
+    return rwb[:r.w]
 }
 
 func ConvertFile(f *os.File) []byte {
-    builder.Reset()
+    renderWriteBuf.Reset()
     fi, err := f.Stat()
     if err != nil {
         log.Fatalf("stat error: %s", err)
     }
-    builder.Grow(int(fi.Size() * 2))
+    renderWriteBuf.Grow(int(fi.Size() * 2))
+    rwb:=renderWriteBuf.Bytes()
+    rwb=rwb[0:cap(rwb)]
     parser := parser{tokens:Tokenize(f, int(fi.Size() * 2))}
-    parser.parse(&renderer{&builder, stack[:0]})
-    return builder.Bytes()
-}
-
-func (r *renderer) writeString(s string) {
-    r.b.WriteString(s)
+    r:=&renderer{rwb, stack[:0], 0}
+    parser.parse(r)
+    return rwb[:r.w]
 }
 
 func (r *renderer) writeByte(by byte) {
-    r.b.WriteByte(by)
+    r.buf[r.w] = by
+    r.w++
 }
 
 func (r *renderer) write(by []byte) {
-    r.b.Write(by)
+    r.w += copy(r.buf[r.w:], by)
 }
 
 func (r *renderer) writeEntityEscaped(b []byte) {
     for {
         i:=indexAnyFast(b, entityAsciiSet)
         if i > -1 {
-            r.b.Write(b[:i])
-            r.b.Write(entities[int8(b[i])])
+            r.write(b[:i])
+            r.write(entities[int8(b[i])])
             b = b[i+1:]
         } else {
-            r.b.Write(b)
+            r.write(b)
             return
         }
     }
@@ -152,9 +155,9 @@ func (r *renderer) writeEntityEscaped(b []byte) {
 //     for _, c := range b {
 //         switch c {
 //         case '&', '\'',  '<', '>', '"': 
-//             r.b.Write(entities[int8(c)])
+//             r.write(entities[int8(c)])
 //         default:
-//             r.b.WriteByte(c)
+//             r.writeByte(c)
 //         }
 //     }
 // }
