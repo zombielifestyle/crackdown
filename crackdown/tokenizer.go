@@ -4,15 +4,9 @@ import (
     "io"
     "fmt"
     "log"
-    "sync"
+    // "sync"
     "bytes"
 )
-
-var bufPool = sync.Pool{
-    New: func() any {
-        return new(bytes.Buffer)
-    },
-}
 
 type tokenizer struct {
     buf []byte
@@ -27,23 +21,50 @@ func init() {
     }
 }
 
+// var bufPool = sync.Pool{
+//     New: func() any {
+//         return new(bytes.Buffer)
+//     },
+// }
+
+// func Tokenize(r io.Reader, l int) []byte {
+//     buf:= bufPool.Get().(*bytes.Buffer)
+//     buf.Reset()
+//     buf.Grow(max(128, l))
+//     buf.ReadFrom(r)
+
+//     tok:= bufPool.Get().(*bytes.Buffer)
+//     tok.Reset()
+//     tok.Grow(max(128,l*2))
+//     t:=tok.Bytes()
+
+//     tokenizer := tokenizer{buf: buf.Bytes()}
+//     out := tokenizer.tokenize(t[0:cap(t)])
+
+//     bufPool.Put(buf)
+//     bufPool.Put(tok)
+
+//     return out
+// }
+
+var tokenReadBuffer *bytes.Buffer = new(bytes.Buffer)
+var tokenWriteBuffer *bytes.Buffer = new(bytes.Buffer)
+// var tokenWriteBuffer []byte
+
 func Tokenize(r io.Reader, l int) []byte {
-    buf:= bufPool.Get().(*bytes.Buffer)
-    buf.Reset()
-    buf.Grow(max(128, l))
-    buf.ReadFrom(r)
+    // buf:= tokenReadBuffer
+    tokenReadBuffer.Reset()
+    tokenReadBuffer.Grow(max(128, l))
+    tokenReadBuffer.ReadFrom(r)
+    buf:= tokenReadBuffer.Bytes()
 
-    tok:= bufPool.Get().(*bytes.Buffer)
-    tok.Reset()
-    tok.Grow(max(128,l*2))
-    t:=tok.Bytes()
+    // twb := tokenWriteBuffer
+    tokenWriteBuffer.Reset()
+    tokenWriteBuffer.Grow(max(128, l*2))
+    wb:= tokenWriteBuffer.Bytes()
 
-    tokenizer := tokenizer{buf: buf.Bytes()}
-    out := tokenizer.tokenize(t[0:cap(t)])
-    // out := tokenizer.tokenize(t[:0])
-
-    bufPool.Put(buf)
-    bufPool.Put(tok)
+    tokenizer := tokenizer{buf: buf}
+    out := tokenizer.tokenize(wb[0:cap(wb)])
 
     return out
 }
