@@ -77,11 +77,12 @@ var entities = map[int8][]byte {
     '&':  []byte{'&','a','m','p',';'},
     '\'': []byte{'&','#','3','9',';'},
     '<':  []byte{'&','l','t',';'},
-    '>':  []byte{'&','l','t',';'},
+    '>':  []byte{'&','g','t',';'},
     '"':  []byte{'&','#','3','4',';'},
 }
 
-var myass asciiSet
+var syntaxAsciiSet asciiSet
+var entityAsciiSet asciiSet
 
 var stack = make([]tagNesting, 0, 254)
 // var builder strings.Builder
@@ -92,9 +93,13 @@ func init() {
     ubuf.Grow(1024*8)
     builder.Grow(1024*8)
     isASCII:=false
-    myass, isASCII = makeASCIISet("\n*_~-`#>")
+    syntaxAsciiSet, isASCII = makeASCIISet("\n*_~-`#>")
     if !isASCII {
-        log.Fatal("asciiset failed")
+        log.Fatal("syntax asciiset failed")
+    }
+    entityAsciiSet, isASCII = makeASCIISet("&'<>\"")
+    if !isASCII {
+        log.Fatal("entity asciiset failed")
     }
 }
 
@@ -130,15 +135,29 @@ func (r *renderer) write(by []byte) {
 }
 
 func (r *renderer) writeEntityEscaped(b []byte) {
-    for _, c := range b {
-        switch c {
-        case '&', '\'',  '<', '>', '"': 
-            r.b.Write(entities[int8(c)])
-        default:
-            r.b.WriteByte(c)
+    for {
+        i:=indexAnyFast(b, entityAsciiSet)
+        if i > -1 {
+            r.b.Write(b[:i])
+            r.b.Write(entities[int8(b[i])])
+            b = b[i+1:]
+        } else {
+            r.b.Write(b)
+            return
         }
     }
 }
+
+// func (r *renderer) writeEntityEscaped(b []byte) {
+//     for _, c := range b {
+//         switch c {
+//         case '&', '\'',  '<', '>', '"': 
+//             r.b.Write(entities[int8(c)])
+//         default:
+//             r.b.WriteByte(c)
+//         }
+//     }
+// }
 
 func (r *renderer) open(t int8, level int8) {
     r.write(tags[t].open)
@@ -395,7 +414,7 @@ func (p *parser) parse(r *renderer) {
             r.openOrClose(tagS, indentation)
         default:
             // i:=bytes.IndexAny(p.tokens[p.i:], "\n*_~-`#>")
-            i:=indexAnyFast(p.tokens[p.i:], myass)
+            i:=indexAnyFast(p.tokens[p.i:], syntaxAsciiSet)
             if i < 2 || p.i + 1 > p.ln {
                 r.writeByte(p.current())
                 p.skip(1)

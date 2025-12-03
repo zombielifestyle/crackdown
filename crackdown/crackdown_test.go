@@ -123,6 +123,7 @@ func TestCode(t *testing.T) {
         {"```\n__verbatim__```", "<pre><code>__verbatim__</code></pre>"},
         {"```code```", "<pre><code>code</code></pre>"},
         {"```close on EOF", "<pre><code>close on EOF\n\n</code></pre>"},
+        {"```ey<1>```", "<pre><code>ey&lt;1&gt;</code></pre>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)
