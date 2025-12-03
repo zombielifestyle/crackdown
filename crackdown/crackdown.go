@@ -3,7 +3,7 @@ package crackdown
 
 import (
     "os"
-    // "fmt"
+    "fmt"
     // "io"
     "log"
     "bytes"
@@ -91,6 +91,9 @@ var renderWriteBuf bytes.Buffer
 var ubuf bytes.Buffer
 
 func init() {
+    if false {
+        fmt.Print("")
+    }
     ubuf.Grow(1024*8)
     renderWriteBuf.Grow(1024*8)
     isASCII:=false
@@ -297,27 +300,36 @@ func (p *parser) parse(r *renderer) {
 
         switch {
         case startOfBlock && p.peek() == '-':
+            // p.skip(1)
+            // i:=p.count('-')
+            // if i > 2 && p.tokens[p.i+i] == '\n' {
+            //     r.write(tags[tagHr].close)
+            //     r.writeByte('\n')
+            //     p.skip(i)
+            // } else {
+            //     r.open(tagP, indentation)
+            //     r.write(p.tokens[p.i:i+2])
+            //     p.skip(i)
+            // }
             p.skip(1)
             ubuf.Reset()
-            for range p.count('-') - 1 {
+            i:=p.count('-')
+            for range i {
                 ubuf.WriteByte(p.current())
                 p.skip(1)
             }
-            if p.peek() == '\n' {
+            if p.current() == '\n' {
                 r.write(tags[tagHr].close)
-                r.writeByte(byte('\n'))
+                r.writeByte('\n')
             } else {
-                ubuf.WriteByte(p.current())
                 r.open(tagP, indentation)
                 r.write(ubuf.Bytes())
             }
-            p.skip(1)
         case startOfBlock && p.peek() == '#':
+            // todo test para with #
             p.skip(1)
             cnt := p.count('#')
-            for range cnt - 1 {
-                p.skip(1)
-            }
+            p.skip(cnt-1)
             if cnt >= 1 && cnt <= 6 {
                 r.open(int8(cnt), indentation)
             } else {
