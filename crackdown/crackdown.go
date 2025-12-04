@@ -15,7 +15,6 @@ import (
 
 )
 
-
 type tag struct {
     open []byte
     close []byte
@@ -89,6 +88,7 @@ var entityAsciiSet asciiSet
 var stack = make([]tagNesting, 0, 254)
 var renderWriteBuf bytes.Buffer
 var ubuf bytes.Buffer
+var readBuffer bytes.Buffer
 
 func init() {
     if false {
@@ -97,7 +97,7 @@ func init() {
     ubuf.Grow(1024*8)
     renderWriteBuf.Grow(1024*8)
     isASCII:=false
-    syntaxAsciiSet, isASCII = makeASCIISet("\n*_~-`#>")
+    syntaxAsciiSet, isASCII = makeASCIISet("\r\n*_~-`#>")
     if !isASCII {
         log.Fatal("syntax asciiset failed")
     }
@@ -108,26 +108,43 @@ func init() {
 }
 
 func ConvertString(s *strings.Reader) []byte {
+    readBuffer.Reset()
+    readBuffer.Grow(max(128, s.Len()))
+    readBuffer.WriteByte('\n')
+    readBuffer.WriteByte('\n')
+    readBuffer.ReadFrom(s)
+    buf:= readBuffer.Bytes()
+
     renderWriteBuf.Reset()
     renderWriteBuf.Grow(s.Len()*2)
     rwb:=renderWriteBuf.Bytes()
     rwb=rwb[0:cap(rwb)]
-    parser := parser{tokens:Tokenize(s, s.Len())}
+
+    parser := parser{tokens:buf}
     r:=&renderer{rwb, stack[:0], 0}
     parser.parse(r)
     return rwb[:r.w]
 }
 
 func ConvertFile(f *os.File) []byte {
+
     renderWriteBuf.Reset()
     fi, err := f.Stat()
     if err != nil {
         log.Fatalf("stat error: %s", err)
     }
+
+    readBuffer.Reset()
+    readBuffer.Grow(max(128, int(fi.Size() * 2)))
+    readBuffer.WriteByte('\n')
+    readBuffer.WriteByte('\n')
+    readBuffer.ReadFrom(f)
+    buf:= readBuffer.Bytes()
+
     renderWriteBuf.Grow(int(fi.Size() * 2))
     rwb:=renderWriteBuf.Bytes()
     rwb=rwb[0:cap(rwb)]
-    parser := parser{tokens:Tokenize(f, int(fi.Size() * 2))}
+    parser := parser{tokens:buf}
     r:=&renderer{rwb, stack[:0], 0}
     parser.parse(r)
     return rwb[:r.w]
@@ -201,15 +218,10 @@ func (r *renderer) getTagNestingLevel(t int8) int8 {
 }
 
 func (p *parser) current() byte {
-    if p.i > p.ln {
+    if p.i >= p.ln {
         return 0
     }
     return p.tokens[p.i]
-
-    // if p.i <= p.ln {
-    //     return p.tokens[p.i]
-    // }
-    // return 0
 }
 
 func (p *parser) accept(ch byte) bool {
@@ -233,7 +245,7 @@ func (p *parser) skip(n int) {
 
 func (p *parser) peekSlice(n int) []byte {
     i := p.i + 1
-    if i > len(p.tokens) {
+    if i > p.ln {
         return p.tokens[:0]
     } else if i+n >= p.ln {
         return p.tokens[i:]
@@ -246,20 +258,35 @@ func (p *parser) back() {
 }
 
 func (p *parser) count(ch byte) int {
-    for i:=p.i; i <= p.ln; i++ {
+    i:=p.i
+    for ; i < p.ln; i++ {
         if p.tokens[i] != ch {
-            return i - p.i
+            break
         }
     }
-    return 0
+    return i - p.i
+}
+
+func (p *parser) eol() bool {
+    if p.i >= p.ln {
+        return true
+    }
+    c:=p.tokens[p.i]
+    if c == '\n' || c == '\r' {
+        return true
+    }
+    return false
 }
 
 func (p *parser) parse(r *renderer) {
-    p.ln = len(p.tokens) - 1
+    p.ln = len(p.tokens)
+
+    if bytes.Trim(p.tokens, "\r\n\t ") == nil {
+        p.tokens = p.tokens[:0]
+        return
+    }
     /*
     todo:
-    - optimize entity escaping
-    - how to reduce bounds checks?
     - links, references, footnotes
     - ordered lists
     - entities
@@ -268,38 +295,78 @@ func (p *parser) parse(r *renderer) {
     - todo more flexible rulers
     - blockquote nesting
     - header right hand side decorations?
-    - not sure how to handle newlines in `code`
     */
     var indentation int8 = 0
     var startOfLine bool = true
     var startOfBlock bool = true
 
+
+
     for p.i < p.ln {
 
-        if p.current() == '\n' {
-            p.skip(1)
-            startOfLine = true
-            if p.current() == '\n' {
-                p.skip(1)
-                startOfBlock = true
-                r.closeAll()
-            }
+        i:=indexAnyFast(p.tokens[p.i:], syntaxAsciiSet)
+        if p.i + i >= p.ln {
+            r.write(p.tokens[p.i:])
+            p.skip(len(p.tokens[p.i:]))
+            break
+        }
+        if i < 0 {
+            r.write(p.tokens[p.i:])
+            p.skip(len(p.tokens[p.i:]))
+            break
+        } else {
+            r.write(p.tokens[p.i:p.i+i])
+            p.skip(i)
+        }
 
-            indentation = 0
-            if p.current() == '\t' {
-                for p.accept('\t') {
-                    indentation++
+        startOfBlock = false
+        startOfLine = false
+        if p.tokens[p.i] == '\n' || p.tokens[p.i] == '\r' {
+            nls:=0
+            for ; p.i < p.ln; p.i++ {
+                if p.tokens[p.i] == '\n' {
+                    nls++
+                } else if p.tokens[p.i] == '\r' {
+                } else {
+                    break
                 }
             }
-            // cases that need startOfLine/startOfBlock are expected to peek
-            p.back()
-        } else {
-            startOfLine = false
-            startOfBlock = false
+            startOfLine = true
+            if nls > 1 {
+                startOfBlock = true
+            }
+            if p.i >= p.ln {
+                break
+            }
+            indentation = 0
+            if p.tokens[p.i] == ' ' || p.tokens[p.i] == '\t' {
+                cnt:=0
+                for ; p.i < p.ln; p.i++ {
+                    if p.tokens[p.i] == '\t' {
+                        cnt += 4
+                    } else if p.tokens[p.i] == ' ' {
+                        cnt++
+                    } else {
+                        break
+                    }
+                }
+                indentation = int8(cnt/4)
+            }
+        }
+
+        if startOfLine && r.hasTag(tagP) {
+            r.writeByte('\n')
+        }
+
+        if startOfBlock {
+            for i:=len(r.stack)-1; i >= 0; i-- {
+                r.close()
+            }
         }
 
         switch {
-        case startOfBlock && p.peek() == '-':
+        case startOfBlock && p.current() == '-':
+            /*
             // p.skip(1)
             // i:=p.count('-')
             // if i > 2 && p.tokens[p.i+i] == '\n' {
@@ -311,34 +378,26 @@ func (p *parser) parse(r *renderer) {
             //     r.write(p.tokens[p.i:i+2])
             //     p.skip(i)
             // }
-            p.skip(1)
+            // p.skip(1)
+            */
             ubuf.Reset()
             i:=p.count('-')
             for range i {
                 ubuf.WriteByte(p.current())
                 p.skip(1)
             }
-            if p.current() == '\n' {
+
+            if p.eol() {
                 r.write(tags[tagHr].close)
                 r.writeByte('\n')
             } else {
                 r.open(tagP, indentation)
                 r.write(ubuf.Bytes())
-            }
-        case startOfBlock && p.peek() == '#':
-            // todo test para with #
-            p.skip(1)
-            cnt := p.count('#')
-            p.skip(cnt-1)
-            if cnt >= 1 && cnt <= 6 {
-                r.open(int8(cnt), indentation)
-            } else {
-                r.open(tagP, indentation)
                 r.writeByte(p.current())
+                p.skip(1)
             }
-            p.skip(1)
-        case startOfBlock && string(p.peekSlice(3)) == "```":
-            p.skip(4)
+        case startOfBlock && string(p.tokens[p.i:p.i+3]) == "```":
+            p.skip(3)
             if p.current() == '\n' {
                 p.skip(1)
             }
@@ -346,29 +405,35 @@ func (p *parser) parse(r *renderer) {
             r.write(tags[tagCode].open)
             i := bytes.Index(p.tokens[p.i:], []byte("```"))
             if i < 0 {
-                i = p.ln - p.i + 1
+                i = p.ln - p.i
             }
             r.writeEntityEscaped(p.tokens[p.i:p.i+i])
             p.skip(i+3)
             r.write(tags[tagCode].close)
             r.write(tags[tagPre].close)
-            r.writeByte('\n')
-            if p.current() == '\n' {
-                p.skip(1)
+        case startOfBlock && p.current() == '#':
+            cnt := p.count('#')
+            if cnt >= 1 && cnt <= 6 {
+                r.open(int8(cnt), indentation)
+                p.skip(cnt)
+            } else {
+                r.open(tagP, indentation)
+                r.write(p.tokens[p.i:p.i+cnt])
+                p.skip(cnt)
             }
-        case startOfBlock && isLetter(p.peek()):
-            p.skip(1)
+        case startOfBlock && isLetter(p.current()):
             if !r.hasTag(tagP) {
                 r.open(tagP, indentation)
             }
+            r.writeByte(p.current())
+            p.skip(1)
 
 
-        case startOfLine && p.peek() == '>':
-            p.skip(2)
+        case startOfLine && p.current() == '>':
+            p.skip(1)
             r.open(tagBq, indentation)
-        case startOfLine && string(p.peekSlice(2)) == "* ":
+        case startOfLine && string(p.tokens[p.i:p.i+2]) == "* ":
             p.skip(2)
-
             if !r.hasTag(tagLi) {
                 r.open(tagUl, indentation)
                 r.open(tagLi, indentation)
@@ -390,17 +455,6 @@ func (p *parser) parse(r *renderer) {
                 }
             }
 
-
-        case p.current() == '`':
-            p.skip(1)
-            r.write(tags[tagCode].open)
-            i := bytes.Index(p.tokens[p.i:], []byte("`"))
-            if i < 0 {
-                i = len(p.tokens[p.i:])-2
-            }
-            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
-            r.write(tags[tagCode].close)
-            p.skip(i+1)
         case p.current() == '*' && p.peek() == '*':
             r.openOrClose(tagB, indentation)
             p.skip(2)
@@ -410,16 +464,22 @@ func (p *parser) parse(r *renderer) {
         case p.current() == '~' && p.peek() == '~':
             p.skip(2)
             r.openOrClose(tagS, indentation)
-        default:
-            i:=indexAnyFast(p.tokens[p.i:], syntaxAsciiSet)
-            if i < 2 || p.i + 1 > p.ln {
-                r.writeByte(p.current())
-                p.skip(1)
-            } else {
-                r.write(p.tokens[p.i:p.i+i])
-                p.skip(i)
+            break
+        case p.current() == '`':
+            p.skip(1)
+            r.write(tags[tagCode].open)
+            i := bytes.Index(p.tokens[p.i:], []byte("`"))
+            if i < 0 {
+                i = len(p.tokens[p.i:])
             }
+            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
+            r.write(tags[tagCode].close)
+            p.skip(i+1)
+        default:
+            r.writeByte(p.current())
+            p.skip(1)
         }
+
     }
     r.closeAll()
 }
@@ -429,8 +489,6 @@ func isLetter(c byte) bool {
         return true
     }
     return false
-    // r, _ := utf8.DecodeRuneInString(s)
-    // return unicode.IsLetter(r)
 }
 
 // stolen from bytes.IndexAny to use an persistent asciiSet

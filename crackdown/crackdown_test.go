@@ -18,8 +18,9 @@ import (
 
 
 // func TestMain(m *testing.M) {
-//     defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+//     // defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 //     m.Run()
+//     // Stats()
 // }
 
 var fileData string
@@ -35,7 +36,7 @@ func init(){
 
 func doConvertString(in string) string {
     rdr.Reset(in)
-    return strings.Trim(string(ConvertString(&rdr)), "\n")
+    return strings.Trim(string(ConvertString(&rdr)), "\r\n")
 }
 
 func doConvertStringDiscard(in string) {
@@ -64,26 +65,26 @@ func TestWhitespace(t *testing.T) {
     cases := []struct {
         in, want string
     }{
-        {"\r\n\r\npara\r\n\r\n", "<p>para</p>\n"},
-        {"\n\npara\r\nmixed\n\n", "<p>para\nmixed</p>\n"},
+        {"", ""},
         {"\r\n\r\n\r\n\r\n", ""},
-        {"\n\n\t\n\t\n\n", "\t\t\n"},
+        {"\n\n\t\n\t\n\n", ""},
+        {"\n\npara\r\nmixed\n\n", "<p>para\nmixed</p>"},
+        {"\r\n\r\npara\r\n\r\n", "<p>para</p>"},
     }
     for _, c := range cases {
-        rdr.Reset(c.in)
-        got := string(ConvertString(&rdr))
+        // rdr.Reset(c.in)
+        got := doConvertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
     }
 }
 
-func TestInlineMarkupBasic(t *testing.T) {
+func TestInlineBasic(t *testing.T) {
 
     cases := []struct {
         in, want string
     }{
-        {"", ""},
         {"__italics__", "<i>italics</i>"},
         {"**bold**", "<b>bold</b>"},
         {"~~strike~~", "<s>strike</s>"},
@@ -102,19 +103,64 @@ func TestInlineMarkupBasic(t *testing.T) {
     }
 }
 
-func TestBlockMarkupBasic(t *testing.T) {
+func TestHrBasic(t *testing.T) {
     cases := []struct {
         in, want string
     }{
-        {"a paragraph", "<p>a paragraph</p>"},
-        {"--- para", "<p>--- para</p>"},
         {"---", "<hr/>"},
         {"------", "<hr/>"},
-        {"---\n---\n---", "<hr/>\n<hr/>\n<hr/>"},
+        {"---\n\n---\n\n---", "<hr/>\n<hr/>\n<hr/>"},
+    }
+    for _, c := range cases {
+        got := doConvertString(c.in)
+        if got != c.want {
+            t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
+        }
+    }
+}
+
+func TestCodeBasic(t *testing.T) {
+    cases := []struct {
+        in, want string
+    }{
+        {"```\n__verbatim__```", "<pre><code>__verbatim__</code></pre>"},
+        {"```code```", "<pre><code>code</code></pre>"},
+        {"```close on EOF", "<pre><code>close on EOF</code></pre>"},
+        {"```ey<1>```", "<pre><code>ey&lt;1&gt;</code></pre>"},
+        {"```multi\nline```", "<pre><code>multi\nline</code></pre>"},
+        {"```multi\r\nline```", "<pre><code>multi\r\nline</code></pre>"},
+    }
+    for _, c := range cases {
+        got := doConvertString(c.in)
+        if got != c.want {
+            t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
+        }
+    }
+}
+
+func TestHeaderBasic(t *testing.T) {
+    cases := []struct {
+        in, want string
+    }{
         {"#h1", "<h1>h1</h1>"},
+        {"##h2", "<h2>h2</h2>"},
+        {"###h3", "<h3>h3</h3>"},
+        {"####h4", "<h4>h4</h4>"},
+        {"#####h5", "<h5>h5</h5>"},
         {"######h6", "<h6>h6</h6>"},
-        {"#**h1b**", "<h1><b>h1b</b></h1>"},
-        {"* ul", "<ul><li> ul</li></ul>"},
+    }
+    for _, c := range cases {
+        got := doConvertString(c.in)
+        if got != c.want {
+            t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
+        }
+    }
+}
+
+func TestQuoteBasic(t *testing.T) {
+    cases := []struct {
+        in, want string
+    }{
         {"> bq", "<blockquote> bq</blockquote>"},
     }
     for _, c := range cases {
@@ -125,14 +171,14 @@ func TestBlockMarkupBasic(t *testing.T) {
     }
 }
 
-func TestCode(t *testing.T) {
+func TestParaBasic(t *testing.T) {
     cases := []struct {
         in, want string
     }{
-        {"```\n__verbatim__```", "<pre><code>__verbatim__</code></pre>"},
-        {"```code```", "<pre><code>code</code></pre>"},
-        {"```close on EOF", "<pre><code>close on EOF\n\n</code></pre>"},
-        {"```ey<1>```", "<pre><code>ey&lt;1&gt;</code></pre>"},
+        {"a paragraph", "<p>a paragraph</p>"},
+        {"--- para", "<p>--- para</p>"},
+        {"multi\nline", "<p>multi\nline</p>"},
+        {"####### heh", "<p>####### heh</p>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)
@@ -140,7 +186,6 @@ func TestCode(t *testing.T) {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
     }
-    
 }
 
 func TestMultiplineParagraphs(t *testing.T) {
@@ -166,16 +211,17 @@ func TestUnorderedLists(t *testing.T) {
         in, want string
     }{
         // top level
-        {"* a\n* b", "<ul><li> a</li><li> b</li></ul>"},
-        {"* a\n* b\n* c", "<ul><li> a</li><li> b</li><li> c</li></ul>"},
+        {"* ul", "<ul><li>ul</li></ul>"},
+        {"* a\n* b", "<ul><li>a</li><li>b</li></ul>"},
+        {"* a\n* b\n* c", "<ul><li>a</li><li>b</li><li>c</li></ul>"},
         // two lists
-        {"* a\n\n* a", "<ul><li> a</li></ul><ul><li> a</li></ul>"},
+        {"* a\n\n* b", "<ul><li>a</li></ul><ul><li>b</li></ul>"},
         // nested
-        {"* a\n\t* b", "<ul><li> a<ul><li> b</li></ul></li></ul>"},
-        {"* a\n\t* b\n\t\t* c", "<ul><li> a<ul><li> b<ul><li> c</li></ul></li></ul></li></ul>"},
-        {"* a\n\t* b\n* c", "<ul><li> a<ul><li> b</li></ul></li><li> c</li></ul>"},
-        {"* a\n\t* b\n\t\t* c\n\t* d","<ul><li> a<ul><li> b<ul><li> c</li></ul></li><li> d</li></ul></li></ul>"},
-        {"* a\n\t* b\n\t\t* c\n* d", "<ul><li> a<ul><li> b<ul><li> c</li></ul></li></ul></li><li> d</li></ul>"},
+        {"* a1\n\t* b", "<ul><li>a1<ul><li>b</li></ul></li></ul>"},
+        {"* a2\n\t* b\n\t\t* c", "<ul><li>a2<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>"},
+        {"* a3\n\t* b\n* c", "<ul><li>a3<ul><li>b</li></ul></li><li>c</li></ul>"},
+        {"* a4\n\t* b\n\t\t* c\n\t* d","<ul><li>a4<ul><li>b<ul><li>c</li></ul></li><li>d</li></ul></li></ul>"},
+        {"* a5\n\t* b\n\t\t* c\n* d", "<ul><li>a5<ul><li>b<ul><li>c</li></ul></li></ul></li><li>d</li></ul>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)
@@ -192,8 +238,10 @@ func TestBugOrFeature(t *testing.T) {
         // bug or not?
         // {"multi \n```code\n``` para", "<p>multi <pre><code>code\n</code></pre>\n para</p>"},
         // these could be prevented with escapes
-        {"multi\n> para", "<p>multi<blockquote> para</blockquote></p>"},
-        {"multi\n* para", "<p>multi<ul><li> para</li></ul></p>"},
+        {"multi\n> para", "<p>multi\n<blockquote> para</blockquote></p>"},
+        {"multi\n* para", "<p>multi\n<ul><li>para</li></ul></p>"},
+        // should create a para
+        // {"---\n---\n---", "<hr/>\n<hr/>\n<hr/>"},
     }
     for _, c := range cases {
         got := doConvertString(c.in)

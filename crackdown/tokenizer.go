@@ -57,7 +57,7 @@ func Tokenize(r io.Reader, l int) []byte {
     buf:= tokenReadBuffer.Bytes()
 
     tokenWriteBuffer.Reset()
-    tokenWriteBuffer.Grow(max(128, l))
+    tokenWriteBuffer.Grow(max(128, l*2))
     wb:= tokenWriteBuffer.Bytes()
 
     tokenizer := tokenizer{buf: buf}
@@ -125,7 +125,8 @@ func (t *tokenizer) tokenize(tokens []byte) []byte {
                 tokens[w] = '\n'
                 w++
             }
-        } else if t.buf[r] == ' ' || t.buf[r] == '\t' {
+        }
+        if t.buf[r] == ' ' || t.buf[r] == '\t' {
             cnt:=0
             for ; r < m; r++ {
                 if t.buf[r] == '\t' {
