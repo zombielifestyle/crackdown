@@ -4,13 +4,9 @@ package crackdown
 import (
     "os"
     "fmt"
-    // "io"
     "log"
     "bytes"
-    // "bufio"
-    // "html"
     "strings"
-    // "unicode"
     "unicode/utf8"
 
 )
@@ -21,7 +17,7 @@ type tag struct {
 }
 
 type tagNesting struct {
-    t, level int8
+    t, level uint8
 }
 
 type parser struct {
@@ -37,7 +33,7 @@ type renderer struct {
 }
 
 const (
-    tagP int8  = iota
+    tagP uint8 = iota
     tagH1
     tagH2
     tagH3
@@ -74,7 +70,7 @@ var tags = [...]tag {
     tagPre:  tag{open: []byte("<pre>"), close: []byte("</pre>")},
 }
 
-var entities = [256][6]uint8{
+var entities = [255][6]uint8{
     '&':  {6, '&','a','m','p',';'},
     '\'': {6, '&','#','3','9',';'},
     '<':  {5, '&','l','t',';'},
@@ -85,17 +81,15 @@ var entities = [256][6]uint8{
 var syntaxAsciiSet asciiSet
 var entityAsciiSet asciiSet
 
-var stack = make([]tagNesting, 0, 254)
-var renderWriteBuf bytes.Buffer
-var ubuf bytes.Buffer
-var readBuffer bytes.Buffer
+var stack = make([]tagNesting, 0, 128)
+var writeBuf bytes.Buffer
+var readBuf bytes.Buffer
 
 func init() {
     if false {
         fmt.Print("")
     }
-    ubuf.Grow(1024*8)
-    renderWriteBuf.Grow(1024*8)
+    writeBuf.Grow(1024*3)
     isASCII:=false
     syntaxAsciiSet, isASCII = makeASCIISet("\r\n*_~-`#>")
     if !isASCII {
@@ -108,16 +102,16 @@ func init() {
 }
 
 func ConvertString(s *strings.Reader) []byte {
-    readBuffer.Reset()
-    readBuffer.Grow(max(128, s.Len()))
-    readBuffer.WriteByte('\n')
-    readBuffer.WriteByte('\n')
-    readBuffer.ReadFrom(s)
-    buf:= readBuffer.Bytes()
+    readBuf.Reset()
+    readBuf.Grow(max(128, s.Len()))
+    readBuf.WriteByte('\n')
+    readBuf.WriteByte('\n')
+    readBuf.ReadFrom(s)
+    buf:= readBuf.Bytes()
 
-    renderWriteBuf.Reset()
-    renderWriteBuf.Grow(s.Len()*2)
-    rwb:=renderWriteBuf.Bytes()
+    writeBuf.Reset()
+    writeBuf.Grow(s.Len()*2)
+    rwb:=writeBuf.Bytes()
     rwb=rwb[0:cap(rwb)]
 
     parser := parser{tokens:buf}
@@ -128,21 +122,21 @@ func ConvertString(s *strings.Reader) []byte {
 
 func ConvertFile(f *os.File) []byte {
 
-    renderWriteBuf.Reset()
     fi, err := f.Stat()
     if err != nil {
         log.Fatalf("stat error: %s", err)
     }
 
-    readBuffer.Reset()
-    readBuffer.Grow(max(128, int(fi.Size() * 2)))
-    readBuffer.WriteByte('\n')
-    readBuffer.WriteByte('\n')
-    readBuffer.ReadFrom(f)
-    buf:= readBuffer.Bytes()
+    readBuf.Reset()
+    readBuf.Grow(max(128, int(fi.Size() * 2)))
+    readBuf.WriteByte('\n')
+    readBuf.WriteByte('\n')
+    readBuf.ReadFrom(f)
+    buf:= readBuf.Bytes()
 
-    renderWriteBuf.Grow(int(fi.Size() * 2))
-    rwb:=renderWriteBuf.Bytes()
+    writeBuf.Reset()
+    writeBuf.Grow(int(fi.Size() * 2))
+    rwb:=writeBuf.Bytes()
     rwb=rwb[0:cap(rwb)]
     parser := parser{tokens:buf}
     r:=&renderer{rwb, stack[:0], 0}
@@ -164,7 +158,7 @@ func (r *renderer) writeEntityEscaped(b []byte) {
         i:=indexAnyFast(b, entityAsciiSet)
         if i > -1 {
             r.write(b[:i])
-            j:=int8(b[i])
+            j:=uint8(b[i])
             r.write(entities[j][1:entities[j][0]])
             b = b[i+1:]
         } else {
@@ -174,7 +168,7 @@ func (r *renderer) writeEntityEscaped(b []byte) {
     }
 }
 
-func (r *renderer) open(t int8, level int8) {
+func (r *renderer) open(t uint8, level uint8) {
     r.write(tags[t].open)
     r.stack = append(r.stack, tagNesting{t, level})
 }
@@ -186,7 +180,7 @@ func (r *renderer) close() {
     }
 }
 
-func (r *renderer) openOrClose(t int8, level int8) {
+func (r *renderer) openOrClose(t uint8, level uint8) {
     if r.hasTag(t) {
         r.close()
     } else {
@@ -195,13 +189,12 @@ func (r *renderer) openOrClose(t int8, level int8) {
 }
 
 func (r *renderer) closeAll() {
-    for i:=len(r.stack); i > 0; i-- {
-        r.write(tags[r.stack[i-1].t].close)
-        r.stack = r.stack[0:i-1]
+    for i:=len(r.stack)-1; i >= 0; i-- {
+        r.close()
     }
 }
 
-func (r *renderer) hasTag(t int8) bool {
+func (r *renderer) hasTag(t uint8) bool {
     for i:=len(r.stack); i > 0; i-- {
         if r.stack[i-1].t == t {
             return true
@@ -210,9 +203,9 @@ func (r *renderer) hasTag(t int8) bool {
     return false
 }
 
-func (r *renderer) getTagNestingLevel(t int8) int8 {
+func (r *renderer) getTagNestingLevel(t uint8) uint8 {
     if len(r.stack) > 0 {
-        return r.stack[int8(len(r.stack)-1)].level
+        return r.stack[uint8(len(r.stack)-1)].level
     }
     return 0
 }
@@ -296,21 +289,13 @@ func (p *parser) parse(r *renderer) {
     - blockquote nesting
     - header right hand side decorations?
     */
-    var indentation int8 = 0
+    var indentation uint8 = 0
     var startOfLine bool = true
     var startOfBlock bool = true
-
-
-
     for p.i < p.ln {
 
         i:=indexAnyFast(p.tokens[p.i:], syntaxAsciiSet)
-        if p.i + i >= p.ln {
-            r.write(p.tokens[p.i:])
-            p.skip(len(p.tokens[p.i:]))
-            break
-        }
-        if i < 0 {
+        if i < 0 || p.i + i >= p.ln {
             r.write(p.tokens[p.i:])
             p.skip(len(p.tokens[p.i:]))
             break
@@ -326,31 +311,33 @@ func (p *parser) parse(r *renderer) {
             for ; p.i < p.ln; p.i++ {
                 if p.tokens[p.i] == '\n' {
                     nls++
-                } else if p.tokens[p.i] == '\r' {
-                } else {
+                    continue
+                } else if p.tokens[p.i] != '\r' {
                     break
                 }
             }
             startOfLine = true
             if nls > 1 {
                 startOfBlock = true
+                r.closeAll()
             }
             if p.i >= p.ln {
                 break
             }
             indentation = 0
-            if p.tokens[p.i] == ' ' || p.tokens[p.i] == '\t' {
+            if p.tokens[p.i] == '\t' || p.tokens[p.i] == ' ' {
                 cnt:=0
                 for ; p.i < p.ln; p.i++ {
                     if p.tokens[p.i] == '\t' {
                         cnt += 4
+                        continue
                     } else if p.tokens[p.i] == ' ' {
                         cnt++
-                    } else {
-                        break
+                        continue
                     }
+                    break
                 }
-                indentation = int8(cnt/4)
+                indentation = uint8(cnt/4)
             }
         }
 
@@ -358,44 +345,17 @@ func (p *parser) parse(r *renderer) {
             r.writeByte('\n')
         }
 
-        if startOfBlock {
-            for i:=len(r.stack)-1; i >= 0; i-- {
-                r.close()
-            }
-        }
-
         switch {
         case startOfBlock && p.current() == '-':
-            /*
-            // p.skip(1)
-            // i:=p.count('-')
-            // if i > 2 && p.tokens[p.i+i] == '\n' {
-            //     r.write(tags[tagHr].close)
-            //     r.writeByte('\n')
-            //     p.skip(i)
-            // } else {
-            //     r.open(tagP, indentation)
-            //     r.write(p.tokens[p.i:i+2])
-            //     p.skip(i)
-            // }
-            // p.skip(1)
-            */
-            ubuf.Reset()
             i:=p.count('-')
-            for range i {
-                ubuf.WriteByte(p.current())
-                p.skip(1)
-            }
-
-            if p.eol() {
+            p.skip(i)
+            if i > 2 && p.eol() {
                 r.write(tags[tagHr].close)
                 r.writeByte('\n')
-            } else {
-                r.open(tagP, indentation)
-                r.write(ubuf.Bytes())
-                r.writeByte(p.current())
-                p.skip(1)
-            }
+                continue
+            } 
+            r.open(tagP, indentation)
+            r.write(p.tokens[p.i-i:p.i])
         case startOfBlock && string(p.tokens[p.i:p.i+3]) == "```":
             p.skip(3)
             if p.current() == '\n' {
@@ -413,14 +373,13 @@ func (p *parser) parse(r *renderer) {
             r.write(tags[tagPre].close)
         case startOfBlock && p.current() == '#':
             cnt := p.count('#')
+            p.skip(cnt)
             if cnt >= 1 && cnt <= 6 {
-                r.open(int8(cnt), indentation)
-                p.skip(cnt)
-            } else {
-                r.open(tagP, indentation)
-                r.write(p.tokens[p.i:p.i+cnt])
-                p.skip(cnt)
+                r.open(uint8(cnt), indentation)
+                continue
             }
+            r.open(tagP, indentation)
+            r.write(p.tokens[p.i-cnt:p.i])
         case startOfBlock && isLetter(p.current()):
             if !r.hasTag(tagP) {
                 r.open(tagP, indentation)
@@ -437,21 +396,21 @@ func (p *parser) parse(r *renderer) {
             if !r.hasTag(tagLi) {
                 r.open(tagUl, indentation)
                 r.open(tagLi, indentation)
-            } else {
-                level := r.getTagNestingLevel(tagLi)
-                switch {
-                case indentation > level:
-                    r.open(tagUl, indentation)
-                    r.open(tagLi, indentation)
-                case indentation == level:
+                continue
+            }
+            level := r.getTagNestingLevel(tagLi)
+            switch {
+            case indentation > level:
+                r.open(tagUl, indentation)
+                r.open(tagLi, indentation)
+            case indentation == level:
+                r.write([]byte("</li><li>"))
+            case indentation < level:
+                for r.stack[len(r.stack)-1].level > indentation {
+                    r.close()
+                }
+                if r.hasTag(tagLi) {
                     r.write([]byte("</li><li>"))
-                case indentation < level:
-                    for r.stack[len(r.stack)-1].level > indentation {
-                        r.close()
-                    }
-                    if r.hasTag(tagLi) {
-                        r.write([]byte("</li><li>"))
-                    }
                 }
             }
 
@@ -464,7 +423,6 @@ func (p *parser) parse(r *renderer) {
         case p.current() == '~' && p.peek() == '~':
             p.skip(2)
             r.openOrClose(tagS, indentation)
-            break
         case p.current() == '`':
             p.skip(1)
             r.write(tags[tagCode].open)
@@ -475,6 +433,7 @@ func (p *parser) parse(r *renderer) {
             r.writeEntityEscaped(p.tokens[p.i:p.i+i])
             r.write(tags[tagCode].close)
             p.skip(i+1)
+
         default:
             r.writeByte(p.current())
             p.skip(1)

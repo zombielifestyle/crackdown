@@ -20,7 +20,7 @@ import (
 // func TestMain(m *testing.M) {
 //     // defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 //     m.Run()
-//     // Stats()
+//     Stats()
 // }
 
 var fileData string
@@ -188,7 +188,7 @@ func TestParaBasic(t *testing.T) {
     }
 }
 
-func TestMultiplineParagraphs(t *testing.T) {
+func TestMultiPara(t *testing.T) {
     cases := []struct {
         in, want string
     }{
