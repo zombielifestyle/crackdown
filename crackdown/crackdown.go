@@ -8,7 +8,6 @@ import (
     "bytes"
     "strings"
     "unicode/utf8"
-
 )
 
 type tag struct {
@@ -20,6 +19,8 @@ type tagNesting struct {
     t, level uint8
 }
 
+type stack [256]tagNesting
+
 type parser struct {
     tokens []byte
     i int
@@ -28,18 +29,20 @@ type parser struct {
 
 type renderer struct {
     buf []byte
-    stack []tagNesting
+    stack *stack
     w int
+    si uint8
 }
 
 const (
-    tagP uint8 = iota
+    _ uint8 = iota
     tagH1
     tagH2
     tagH3
     tagH4
     tagH5
     tagH6
+    tagP
     tagUl 
     tagLi
     tagS
@@ -52,13 +55,13 @@ const (
 )
 
 var tags = [...]tag {
-    tagP:    tag{open: []byte("<p>"), close: []byte("</p>")},
     tagH1:   tag{open: []byte("<h1>"), close: []byte("</h1>")},
     tagH2:   tag{open: []byte("<h2>"), close: []byte("</h2>")},
     tagH3:   tag{open: []byte("<h3>"), close: []byte("</h3>")},
     tagH4:   tag{open: []byte("<h4>"), close: []byte("</h4>")},
     tagH5:   tag{open: []byte("<h5>"), close: []byte("</h5>")},
     tagH6:   tag{open: []byte("<h6>"), close: []byte("</h6>")},
+    tagP:    tag{open: []byte("<p>"), close: []byte("</p>")},
     tagUl:   tag{open: []byte("<ul>"), close: []byte("</ul>")},
     tagLi:   tag{open: []byte("<li>"), close: []byte("</li>")},
     tagS:    tag{open: []byte("<s>"), close: []byte("</s>")},
@@ -70,7 +73,7 @@ var tags = [...]tag {
     tagPre:  tag{open: []byte("<pre>"), close: []byte("</pre>")},
 }
 
-var entitiesEnc = [255][6]uint8{
+var entitiesEnc = [256][6]uint8{
     '&':  {6, '&','a','m','p',';'},
     '\'': {6, '&','#','3','9',';'},
     '<':  {5, '&','l','t',';'},
@@ -78,7 +81,7 @@ var entitiesEnc = [255][6]uint8{
     '"':  {6, '&','#','3','4',';'},
 }
 
-var entities = [255]uint8{
+var entities = [256]uint8{
     '&':  1,
     '\'': 1,
     '<':  1,
@@ -86,7 +89,7 @@ var entities = [255]uint8{
     '"':  1,
 }
 
-var syntax = [255]uint8{
+var syntax = [256]uint8{
     '\r': 1,
     '\n': 1,
     '*':  1,
@@ -98,7 +101,6 @@ var syntax = [255]uint8{
     '>':  1,
 }
 
-var stack = make([]tagNesting, 0, 128)
 var writeBuf bytes.Buffer
 var readBuf bytes.Buffer
 
@@ -123,7 +125,7 @@ func ConvertString(s *strings.Reader) []byte {
     rwb=rwb[0:cap(rwb)]
 
     parser := parser{tokens:buf}
-    r:=&renderer{rwb, stack[:0], 0}
+    r:=&renderer{rwb, &stack{}, 0, 0}
     parser.parse(r)
     return rwb[:r.w]
 }
@@ -146,7 +148,7 @@ func ConvertFile(f *os.File) []byte {
     rwb:=writeBuf.Bytes()
     rwb=rwb[0:cap(rwb)]
     parser := parser{tokens:buf}
-    r:=&renderer{rwb, stack[:0], 0}
+    r:=&renderer{rwb, &stack{}, 0, 0}
     parser.parse(r)
     return rwb[:r.w]
 }
@@ -171,15 +173,14 @@ func (r *renderer) writeEntityEscaped(s []byte) {
 }
 
 func (r *renderer) open(t uint8, level uint8) {
+    r.si++
     r.write(tags[t].open)
-    r.stack = append(r.stack, tagNesting{t, level})
+    r.stack[r.si] = tagNesting{t, level}
 }
 
 func (r *renderer) close() {
-    if len(r.stack) > 0 {
-        r.write(tags[r.stack[len(r.stack)-1].t].close)
-        r.stack = r.stack[0:len(r.stack)-1]
-    }
+    r.write(tags[r.stack[r.si].t].close)
+    r.si--
 }
 
 func (r *renderer) openOrClose(t uint8, level uint8) {
@@ -191,23 +192,23 @@ func (r *renderer) openOrClose(t uint8, level uint8) {
 }
 
 func (r *renderer) closeAll() {
-    for i:=len(r.stack)-1; i >= 0; i-- {
+    for r.si > 0 {
         r.close()
     }
 }
 
 func (r *renderer) hasTag(t uint8) bool {
-    for i:=len(r.stack); i > 0; i-- {
-        if r.stack[i-1].t == t {
+    for  i:= r.si; i > 0; i-- {
+        if r.stack[i].t == t {
             return true
         }
     }
     return false
 }
 
-func (r *renderer) getTagNestingLevel(t uint8) uint8 {
-    if len(r.stack) > 0 {
-        return r.stack[uint8(len(r.stack)-1)].level
+func (r *renderer) getNestingLevel() uint8 {
+    if r.si > 0 {
+        return r.stack[r.si].level
     }
     return 0
 }
@@ -405,7 +406,7 @@ func (p *parser) parse(r *renderer) {
                 r.open(tagLi, indentation)
                 continue
             }
-            level := r.getTagNestingLevel(tagLi)
+            level := r.getNestingLevel()
             switch {
             case indentation > level:
                 r.open(tagUl, indentation)
@@ -413,7 +414,7 @@ func (p *parser) parse(r *renderer) {
             case indentation == level:
                 r.write([]byte("</li><li>"))
             case indentation < level:
-                for r.stack[len(r.stack)-1].level > indentation {
+                for r.stack[r.si].level > indentation {
                     r.close()
                 }
                 if r.hasTag(tagLi) {
