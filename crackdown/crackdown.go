@@ -108,6 +108,12 @@ func init() {
     writeBuf.Grow(1024*3)
 }
 
+func ConvertBytes(rbuf []byte, wbuf []byte) []byte {
+    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0,0}
+    p.parse()
+    return wbuf[:p.wi]
+}
+
 func ConvertString(s *strings.Reader) []byte {
     readBuf.Reset()
     readBuf.Grow(max(128, s.Len()))
@@ -178,7 +184,7 @@ func (p *parser) writeEntityEscaped(s []byte) {
     }
 }
 
-func (p *parser) openParaCond() {
+func (p *parser) openParaCond(t uint8) {
     for i:= p.si; i > 0; i-- {
         if p.stack[i].t == tagP {
             return
@@ -277,9 +283,7 @@ func (p *parser) indexSyntax() int {
 func (p *parser) eol() bool {
     if p.ri >= p.rlen {
         return true
-    }
-    c:=p.rbuf[p.ri]
-    if c == '\n' || c == '\r' {
+    } else if c:=p.rbuf[p.ri]; c == '\n' || c == '\r' {
         return true
     }
     return false
@@ -353,8 +357,10 @@ func (p *parser) parse() {
             p.writeByte('\n')
         }
 
+        current := p.current()
+
         switch {
-        case startOfBlock && p.current() == '#':
+        case startOfBlock && current == '#':
             cnt := p.count('#')
             p.skip(cnt)
             if cnt >= 1 && cnt <= 6 {
@@ -363,7 +369,7 @@ func (p *parser) parse() {
             }
             p.open(tagP)
             p.write(p.rbuf[p.ri-cnt:p.ri])
-        case startOfBlock && p.current() == '-':
+        case startOfBlock && current == '-':
             i:=p.count('-')
             p.skip(i)
             if i > 2 && p.eol() {
@@ -388,12 +394,12 @@ func (p *parser) parse() {
             p.skip(i+3)
             p.write(tags[tagCode].close)
             p.write(tags[tagPre].close)
-        case startOfBlock && isLetter(p.current()):
-            p.openParaCond()
+        case startOfBlock && isLetter(current):
+            p.openParaCond(tagP)
             p.writeByte(p.current())
             p.skip(1)
 
-        case startOfLine && p.rbuf[p.ri] == '*' && p.peek() == ' ':
+        case startOfLine && current == '*' && p.peek() == ' ':
             p.skip(2)
             if !p.hasTag(tagLi) {
                 p.open(tagUl)
@@ -415,19 +421,19 @@ func (p *parser) parse() {
                     p.write([]byte("</li><li>"))
                 }
             }
-        case startOfLine && p.current() == '>':
+        case startOfLine && current == '>':
             p.handleBlockquote()
 
-        case p.current() == '*' && p.peek() == '*':
+        case current == '*' && p.peek() == '*':
             p.handleInlineTag(tagB)
-        case p.current() == '_' && p.peek() == '_':
+        case current == '_' && p.peek() == '_':
             p.handleInlineTag(tagI)
-        case p.current() == '~' && p.peek() == '~':
+        case current == '~' && p.peek() == '~':
             p.handleInlineTag(tagS)
-        case p.current() == '`':
+        case current == '`':
             p.handleInlineCode()
         default:
-            p.writeByte(p.current())
+            p.writeByte(current)
             p.skip(1)
         }
 

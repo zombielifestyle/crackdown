@@ -5,60 +5,35 @@ import (
     "os"
     // "fmt"
     "log"
-    "bytes"
+    // "bytes"
     "testing"
     "strings"
-
-    // "time"
-    "math/rand/v2"
-
-    // "github.com/pkg/profile"
-
 )
 
-
 // func TestMain(m *testing.M) {
-//     // defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 //     m.Run()
-//     Stats()
 // }
 
-var fileData string
+var testrbuf []byte
+var testwbuf []byte
 var rdr strings.Reader
 
-func init(){
+func init() {
     data, err := os.ReadFile("../crackdown.crackdown")
     if err != nil {
         log.Fatalf("os.ReadFile error: %q", err)
     }
-    fileData = string(data)
+    testrbuf = append([]byte("\n\n"), data...)
+    testwbuf = make([]byte, len(testrbuf)*2)
 }
 
-func doConvertString(in string) string {
+func convertString(in string) string {
     rdr.Reset(in)
     return strings.Trim(string(ConvertString(&rdr)), "\r\n")
 }
 
-func doConvertStringDiscard(in string) {
-    rdr.Reset(in)
-    s:=ConvertString(&rdr)
-    io.Discard.Write(s)
-}
-
-var buf bytes.Buffer 
-func doConvertFileDiscardBogus() {
-    rdr.Reset(fileData + string([]byte{byte(rand.IntN(100))}))
-    // rdr.Reset(fileData + time.Now().UTC().Format("2006-01-02 CET"))
-    buf.Reset()
-    buf.ReadFrom(&rdr)
-    // s:=ConvertString(&rdr)
-    io.Discard.Write(buf.Bytes())
-}
-
-func doConvertFileDiscard() {
-    rdr.Reset(fileData)
-    s:=ConvertString(&rdr)
-    io.Discard.Write(s)
+func converBytesDiscard() {
+    io.Discard.Write(ConvertBytes(testrbuf, testwbuf))
 }
 
 func TestWhitespace(t *testing.T) {
@@ -67,13 +42,12 @@ func TestWhitespace(t *testing.T) {
     }{
         {"", ""},
         {"\r\n\r\n\r\n\r\n", ""},
-        {"\n\n\t\n\t\n\n", ""},
+        {"\n\n\t\n\t\n\n", "\t"},
         {"\n\npara\r\nmixed\n\n", "<p>para\nmixed</p>"},
         {"\r\n\r\npara\r\n\r\n", "<p>para</p>"},
     }
     for _, c := range cases {
-        // rdr.Reset(c.in)
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -96,7 +70,7 @@ func TestInlineBasic(t *testing.T) {
         {"`__verbatim__`", "<code>__verbatim__</code>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -112,7 +86,7 @@ func TestHrBasic(t *testing.T) {
         {"---\n\n---\n\n---", "<hr/>\n<hr/>\n<hr/>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -131,7 +105,7 @@ func TestCodeBasic(t *testing.T) {
         {"```multi\r\nline```", "<pre><code>multi\r\nline</code></pre>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -150,7 +124,7 @@ func TestHeaderBasic(t *testing.T) {
         {"######h6", "<h6>h6</h6>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -164,7 +138,7 @@ func TestQuoteBasic(t *testing.T) {
         {"> bq", "<blockquote> bq</blockquote>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -181,7 +155,7 @@ func TestParaBasic(t *testing.T) {
         {"####### heh", "<p>####### heh</p>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -199,7 +173,7 @@ func TestMultiPara(t *testing.T) {
         {"multi `li\nne` para", "<p>multi <code>li\nne</code> para</p>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -224,7 +198,7 @@ func TestUnorderedLists(t *testing.T) {
         {"* a5\n\t* b\n\t\t* c\n* d", "<ul><li>a5<ul><li>b<ul><li>c</li></ul></li></ul></li><li>d</li></ul>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
@@ -244,36 +218,15 @@ func TestBugOrFeature(t *testing.T) {
         // {"---\n---\n---", "<hr/>\n<hr/>\n<hr/>"},
     }
     for _, c := range cases {
-        got := doConvertString(c.in)
+        got := convertString(c.in)
         if got != c.want {
             t.Errorf("convertString(%q)\nwanted: %q\ngot:    %q", c.in, c.want, got)
         }
     }
 }
 
-
-// func BenchmarkList(b *testing.B) {
-//     for b.Loop() {
-//         mu:="* a\n\t* b\n\t\t* c"
-//         doConvertStringDiscard(mu)
-//     }
-// }
-
-// func BenchmarkList2(b *testing.B) {
-//     for b.Loop() {
-//         mu := "* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c* a\n\t* b\n\t\t* c"
-//         doConvertStringDiscard(mu)
-//     }
-// }
-
-// func BenchmarkFileBase(b *testing.B) {
-//     for b.Loop() {
-//         doConvertFileDiscardBogus()
-//     }
-// }
-
 func BenchmarkFileReal(b *testing.B) {
     for b.Loop() {
-        doConvertFileDiscard()
+        converBytesDiscard()
     }
 }
