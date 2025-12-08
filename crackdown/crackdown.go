@@ -7,7 +7,6 @@ import (
     "log"
     "bytes"
     "strings"
-    "unicode/utf8"
 )
 
 type tag struct {
@@ -22,15 +21,12 @@ type tagNesting struct {
 type stack [256]tagNesting
 
 type parser struct {
-    tokens []byte
-    i int
-    ln int
-}
-
-type renderer struct {
-    buf []byte
+    rbuf []byte
+    wbuf []byte
+    ri int
+    rlen int
+    wi int
     stack *stack
-    w int
     si uint8
 }
 
@@ -117,17 +113,15 @@ func ConvertString(s *strings.Reader) []byte {
     readBuf.WriteByte('\n')
     readBuf.WriteByte('\n')
     readBuf.ReadFrom(s)
-    buf:= readBuf.Bytes()
+    rbuf := readBuf.Bytes()
 
     writeBuf.Reset()
     writeBuf.Grow(s.Len()*2)
-    rwb:=writeBuf.Bytes()
-    rwb=rwb[0:cap(rwb)]
+    wbuf := writeBuf.Bytes()
 
-    parser := parser{tokens:buf}
-    r:=&renderer{rwb, &stack{}, 0, 0}
-    parser.parse(r)
-    return rwb[:r.w]
+    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0}
+    p.parse()
+    return wbuf[:p.wi]
 }
 
 func ConvertFile(f *os.File) []byte {
@@ -141,120 +135,116 @@ func ConvertFile(f *os.File) []byte {
     readBuf.WriteByte('\n')
     readBuf.WriteByte('\n')
     readBuf.ReadFrom(f)
-    buf:= readBuf.Bytes()
+    rbuf := readBuf.Bytes()
 
     writeBuf.Reset()
     writeBuf.Grow(int(fi.Size() * 2))
-    rwb:=writeBuf.Bytes()
-    rwb=rwb[0:cap(rwb)]
-    parser := parser{tokens:buf}
-    r:=&renderer{rwb, &stack{}, 0, 0}
-    parser.parse(r)
-    return rwb[:r.w]
+    wbuf := writeBuf.Bytes()
+
+    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0}
+    p.parse()
+    return wbuf[:p.wi]
 }
 
-func (r *renderer) writeByte(by byte) {
-    r.buf[r.w] = by
-    r.w++
+func (p *parser) writeByte(by byte) {
+    p.wbuf[p.wi] = by
+    p.wi++
 }
 
-func (r *renderer) write(by []byte) {
-    r.w += copy(r.buf[r.w:], by)
+func (p *parser) write(by []byte) {
+    p.wi += copy(p.wbuf[p.wi:], by)
 }
 
-func (r *renderer) writeEntityEscaped(s []byte) {
+func (p *parser) writeEntityEscaped(s []byte) {
     for _, c := range s {
         if entities[c] == 1 {
-            r.write(entitiesEnc[c][1:entitiesEnc[c][0]])
+            p.write(entitiesEnc[c][1:entitiesEnc[c][0]])
         } else {
-            r.writeByte(c)
+            p.writeByte(c)
         }
     }
 }
 
-func (r *renderer) open(t uint8, level uint8) {
-    r.si++
-    r.write(tags[t].open)
-    r.stack[r.si] = tagNesting{t, level}
+func (p *parser) openParaCond(t uint8, level uint8) {
+    for i:= p.si; i > 0; i-- {
+        if p.stack[i].t == tagP {
+            return
+        }
+    }
+    p.open(tagP, level)
 }
 
-func (r *renderer) close() {
-    r.write(tags[r.stack[r.si].t].close)
-    r.si--
+func (p *parser) open(t uint8, level uint8) {
+    p.si++
+    p.write(tags[t].open)
+    p.stack[p.si] = tagNesting{t, level}
 }
 
-func (r *renderer) openOrClose(t uint8, level uint8) {
-    if r.hasTag(t) {
-        r.close()
+func (p *parser) close() {
+    p.write(tags[p.stack[p.si].t].close)
+    p.si--
+}
+
+func (p *parser) openOrClose(t uint8, level uint8) {
+    if p.hasTag(t) {
+        p.close()
     } else {
-        r.open(t, level)
+        p.open(t, level)
     }
 }
 
-func (r *renderer) closeAll() {
-    for r.si > 0 {
-        r.close()
+func (p *parser) closeAll() {
+    for p.si > 0 {
+        p.close()
     }
 }
 
-func (r *renderer) hasTag(t uint8) bool {
-    for  i:= r.si; i > 0; i-- {
-        if r.stack[i].t == t {
+func (p *parser) hasTag(t uint8) bool {
+    for i:= p.si; i > 0; i-- {
+        if p.stack[i].t == t {
             return true
         }
     }
     return false
 }
 
-func (r *renderer) getNestingLevel() uint8 {
-    if r.si > 0 {
-        return r.stack[r.si].level
+func (p *parser) getNestingLevel() uint8 {
+    if p.si > 0 {
+        return p.stack[p.si].level
     }
     return 0
 }
 
 func (p *parser) current() byte {
-    if p.i >= p.ln {
+    if p.ri >= p.rlen {
         return 0
     }
-    return p.tokens[p.i]
-}
-
-func (p *parser) accept(ch byte) bool {
-    if p.i <= p.ln && p.tokens[p.i] == ch {
-        p.i++
-        return true
-    }
-    return false
+    return p.rbuf[p.ri]
 }
 
 func (p *parser) peek() byte {
-    if p.i + 1 <= p.ln {
-        return p.tokens[p.i+1]
+    if p.ri + 1 <= p.rlen {
+        return p.rbuf[p.ri+1]
     }
     return 0
 }
 
 func (p *parser) skip(n int) {
-    p.i += n
-}
-
-func (p *parser) back() {
-    p.i--
+    p.ri += n
 }
 
 func (p *parser) count(ch byte) int {
-    i:=p.i
-    for ; i < p.ln; i++ {
-        if p.tokens[i] != ch {
+    i:=p.ri
+    for ; i < p.rlen; i++ {
+        if p.rbuf[i] != ch {
             break
         }
     }
-    return i - p.i
+    return i - p.ri
 }
 
 func (p *parser) indexSyntax() int {
-    for i, c := range p.tokens[p.i:] {
+    for i, c := range p.rbuf[p.ri:] {
         if syntax[c] == 1 {
             return i
         }
@@ -262,31 +252,22 @@ func (p *parser) indexSyntax() int {
     return -1
 }
 
-// func (p *parser) indexSyntax() int {
-//     for i:=p.i; i < p.ln; i++ {
-//         if syntax[p.tokens[i]] == 1 {
-//             return i - p.i
-//         }
-//     }
-//     return -1
-// }
-
 func (p *parser) eol() bool {
-    if p.i >= p.ln {
+    if p.ri >= p.rlen {
         return true
     }
-    c:=p.tokens[p.i]
+    c:=p.rbuf[p.ri]
     if c == '\n' || c == '\r' {
         return true
     }
     return false
 }
 
-func (p *parser) parse(r *renderer) {
-    p.ln = len(p.tokens)
+func (p *parser) parse() {
+    p.rlen = len(p.rbuf)
 
-    if bytes.Trim(p.tokens, "\r\n\t ") == nil {
-        p.tokens = p.tokens[:0]
+    if bytes.Trim(p.rbuf, "\r\n\t ") == nil {
+        p.rbuf = p.rbuf[:0]
         return
     }
     /*
@@ -303,46 +284,46 @@ func (p *parser) parse(r *renderer) {
     var indentation uint8 = 0
     var startOfLine bool = true
     var startOfBlock bool = true
-    for p.i < p.ln {
+    for p.ri < p.rlen {
 
         i:=p.indexSyntax()
-        if i < 0 || p.i + i >= p.ln {
-            r.write(p.tokens[p.i:])
-            p.skip(len(p.tokens[p.i:]))
+        if i < 0 || p.ri + i >= p.rlen {
+            p.write(p.rbuf[p.ri:])
+            p.skip(len(p.rbuf[p.ri:]))
             break
         } else {
-            r.write(p.tokens[p.i:p.i+i])
+            p.write(p.rbuf[p.ri:p.ri+i])
             p.skip(i)
         }
 
         startOfBlock = false
         startOfLine  = false
-        if p.tokens[p.i] == '\n' || p.tokens[p.i] == '\r' {
+        if p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r' {
             nls:=0
-            for ; p.i < p.ln; p.i++ {
-                if p.tokens[p.i] == '\n' {
+            for ; p.ri < p.rlen; p.ri++ {
+                if p.rbuf[p.ri] == '\n' {
                     nls++
                     continue
-                } else if p.tokens[p.i] != '\r' {
+                } else if p.rbuf[p.ri] != '\r' {
                     break
                 }
             }
             startOfLine = true
             if nls > 1 {
                 startOfBlock = true
-                r.closeAll()
+                p.closeAll()
             }
-            if p.i >= p.ln {
+            if p.ri >= p.rlen {
                 break
             }
             indentation = 0
-            if p.tokens[p.i] == '\t' || p.tokens[p.i] == ' ' {
+            if p.rbuf[p.ri] == '\t' || p.rbuf[p.ri] == ' ' {
                 cnt:=0
-                for ; p.i < p.ln; p.i++ {
-                    if p.tokens[p.i] == '\t' {
+                for ; p.ri < p.rlen; p.ri++ {
+                    if p.rbuf[p.ri] == '\t' {
                         cnt += 4
                         continue
-                    } else if p.tokens[p.i] == ' ' {
+                    } else if p.rbuf[p.ri] == ' ' {
                         cnt++
                         continue
                     }
@@ -352,8 +333,8 @@ func (p *parser) parse(r *renderer) {
             }
         }
 
-        if startOfLine && r.hasTag(tagP) {
-            r.writeByte('\n')
+        if startOfLine && p.hasTag(tagP) {
+            p.writeByte('\n')
         }
 
         switch {
@@ -361,130 +342,109 @@ func (p *parser) parse(r *renderer) {
             cnt := p.count('#')
             p.skip(cnt)
             if cnt >= 1 && cnt <= 6 {
-                r.open(uint8(cnt), indentation)
+                p.open(uint8(cnt), indentation)
                 continue
             }
-            r.open(tagP, indentation)
-            r.write(p.tokens[p.i-cnt:p.i])
+            p.open(tagP, indentation)
+            p.write(p.rbuf[p.ri-cnt:p.ri])
         case startOfBlock && p.current() == '-':
             i:=p.count('-')
             p.skip(i)
             if i > 2 && p.eol() {
-                r.write(tags[tagHr].close)
-                r.writeByte('\n')
+                p.write(tags[tagHr].close)
+                p.writeByte('\n')
                 continue
             } 
-            r.open(tagP, indentation)
-            r.write(p.tokens[p.i-i:p.i])
-        case startOfBlock && string(p.tokens[p.i:p.i+3]) == "```":
+            p.open(tagP, indentation)
+            p.write(p.rbuf[p.ri-i:p.ri])
+        case startOfBlock && string(p.rbuf[p.ri:p.ri+3]) == "```":
             p.skip(3)
             if p.current() == '\n' {
                 p.skip(1)
             }
-            r.write(tags[tagPre].open)
-            r.write(tags[tagCode].open)
-            i := bytes.Index(p.tokens[p.i:], []byte("```"))
+            p.write(tags[tagPre].open)
+            p.write(tags[tagCode].open)
+            i := bytes.Index(p.rbuf[p.ri:], []byte("```"))
             if i < 0 {
-                i = p.ln - p.i
+                i = p.rlen - p.ri
             }
-            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
+            p.writeEntityEscaped(p.rbuf[p.ri:p.ri+i])
             p.skip(i+3)
-            r.write(tags[tagCode].close)
-            r.write(tags[tagPre].close)
+            p.write(tags[tagCode].close)
+            p.write(tags[tagPre].close)
         case startOfBlock && isLetter(p.current()):
-            if !r.hasTag(tagP) {
-                r.open(tagP, indentation)
-            }
-            r.writeByte(p.current())
+            p.openParaCond(tagP, indentation)
+            p.writeByte(p.current())
             p.skip(1)
 
-
-        case startOfLine && p.tokens[p.i] == '*' && p.peek() == ' ':
+        case startOfLine && p.rbuf[p.ri] == '*' && p.peek() == ' ':
             p.skip(2)
-            if !r.hasTag(tagLi) {
-                r.open(tagUl, indentation)
-                r.open(tagLi, indentation)
+            if !p.hasTag(tagLi) {
+                p.open(tagUl, indentation)
+                p.open(tagLi, indentation)
                 continue
             }
-            level := r.getNestingLevel()
+            level := p.getNestingLevel()
             switch {
             case indentation > level:
-                r.open(tagUl, indentation)
-                r.open(tagLi, indentation)
+                p.open(tagUl, indentation)
+                p.open(tagLi, indentation)
             case indentation == level:
-                r.write([]byte("</li><li>"))
+                p.write([]byte("</li><li>"))
             case indentation < level:
-                for r.stack[r.si].level > indentation {
-                    r.close()
+                for p.stack[p.si].level > indentation {
+                    p.close()
                 }
-                if r.hasTag(tagLi) {
-                    r.write([]byte("</li><li>"))
+                if p.hasTag(tagLi) {
+                    p.write([]byte("</li><li>"))
                 }
             }
         case startOfLine && p.current() == '>':
-            p.skip(1)
-            r.open(tagBq, indentation)
-
+            p.handleBlockquote(indentation)
 
         case p.current() == '*' && p.peek() == '*':
-            r.openOrClose(tagB, indentation)
-            p.skip(2)
+            p.handleInlineTag(tagB, indentation)
         case p.current() == '_' && p.peek() == '_':
-            r.openOrClose(tagI, indentation)
-            p.skip(2)
+            p.handleInlineTag(tagI, indentation)
         case p.current() == '~' && p.peek() == '~':
-            p.skip(2)
-            r.openOrClose(tagS, indentation)
+            p.handleInlineTag(tagS, indentation)
         case p.current() == '`':
-            p.skip(1)
-            r.write(tags[tagCode].open)
-            i := bytes.Index(p.tokens[p.i:], []byte("`"))
-            if i < 0 {
-                i = len(p.tokens[p.i:])
-            }
-            r.writeEntityEscaped(p.tokens[p.i:p.i+i])
-            r.write(tags[tagCode].close)
-            p.skip(i+1)
-
+            p.handleInlineCode()
         default:
-            r.writeByte(p.current())
+            p.writeByte(p.current())
             p.skip(1)
         }
 
     }
-    r.closeAll()
+    p.closeAll()
+}
+
+func (p * parser) indexByte(b byte) int {
+    if i:=bytes.IndexByte(p.rbuf[p.ri:], b); i > -1 {
+        return i
+    } 
+    return p.rlen - p.ri
+}
+
+func (p * parser) handleBlockquote(indentation uint8) {
+    p.skip(1)
+    p.open(tagBq, indentation)
+}
+
+func (p * parser) handleInlineCode() {
+    p.skip(1)
+    p.write(tags[tagCode].open)
+    i := p.indexByte('`')
+    p.writeEntityEscaped(p.rbuf[p.ri:p.ri+i])
+    p.write(tags[tagCode].close)
+    p.skip(i+1)
+}
+
+func (p * parser) handleInlineTag(t uint8, indentation uint8) {
+    p.skip(2)
+    p.openOrClose(t, indentation)
 }
 
 func isLetter(c byte) bool {
-    if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) {
-        return true
-    }
-    return false
-}
-
-// stolen from bytes.IndexAny to use an persistent asciiSet
-func indexAnyFast(s []byte, as asciiSet) int {
-    for i, c := range s {
-        if as.contains(c) {
-            return i
-        }
-    }
-    return -1
-}
-
-type asciiSet [8]uint32
-
-func (as *asciiSet) contains(c byte) bool {
-    return (as[c/32] & (1 << (c % 32))) != 0
-}
-
-func makeASCIISet(chars string) (as asciiSet, ok bool) {
-    for i := 0; i < len(chars); i++ {
-        c := chars[i]
-        if c >= utf8.RuneSelf {
-            return as, false
-        }
-        as[c/32] |= 1 << (c % 32)
-    }
-    return as, true
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 }
