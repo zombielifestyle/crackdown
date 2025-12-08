@@ -28,6 +28,7 @@ type parser struct {
     wi int
     stack *stack
     si uint8
+    indentation uint8
 }
 
 const (
@@ -119,7 +120,7 @@ func ConvertString(s *strings.Reader) []byte {
     writeBuf.Grow(s.Len()*2)
     wbuf := writeBuf.Bytes()
 
-    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0}
+    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0,0}
     p.parse()
     return wbuf[:p.wi]
 }
@@ -141,7 +142,7 @@ func ConvertFile(f *os.File) []byte {
     writeBuf.Grow(int(fi.Size() * 2))
     wbuf := writeBuf.Bytes()
 
-    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0}
+    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0,0}
     p.parse()
     return wbuf[:p.wi]
 }
@@ -165,19 +166,19 @@ func (p *parser) writeEntityEscaped(s []byte) {
     }
 }
 
-func (p *parser) openParaCond(t uint8, level uint8) {
+func (p *parser) openParaCond(t uint8) {
     for i:= p.si; i > 0; i-- {
         if p.stack[i].t == tagP {
             return
         }
     }
-    p.open(tagP, level)
+    p.open(tagP)
 }
 
-func (p *parser) open(t uint8, level uint8) {
+func (p *parser) open(t uint8) {
     p.si++
     p.write(tags[t].open)
-    p.stack[p.si] = tagNesting{t, level}
+    p.stack[p.si] = tagNesting{t, p.indentation}
 }
 
 func (p *parser) close() {
@@ -185,11 +186,11 @@ func (p *parser) close() {
     p.si--
 }
 
-func (p *parser) openOrClose(t uint8, level uint8) {
+func (p *parser) openOrClose(t uint8) {
     if p.hasTag(t) {
         p.close()
     } else {
-        p.open(t, level)
+        p.open(t)
     }
 }
 
@@ -235,11 +236,7 @@ func (p *parser) skip(n int) {
 
 func (p *parser) count(ch byte) int {
     i:=p.ri
-    for ; i < p.rlen; i++ {
-        if p.rbuf[i] != ch {
-            break
-        }
-    }
+    for ; i < p.rlen && p.rbuf[i] == ch; i++ {}
     return i - p.ri
 }
 
@@ -263,6 +260,25 @@ func (p *parser) eol() bool {
     return false
 }
 
+func (p * parser) skipAndCountTabs() uint8 {
+    if p.rbuf[p.ri] != '\t' && p.rbuf[p.ri] != ' ' {
+        return 0
+    }
+    cnt:=uint8(0)
+    for ; p.ri < p.rlen && (p.rbuf[p.ri] == '\t' || p.rbuf[p.ri] == ' '); p.ri++ {
+        cnt += p.rbuf[p.ri]&1 * 3 + 1
+    }
+    return cnt/4
+}
+
+func (p * parser) skipAndCountNewlines() uint8 {
+    cnt:=uint8(0)
+    for ; p.ri < p.rlen && (p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r'); p.ri++ {
+        cnt += p.rbuf[p.ri]>>1&1
+    }
+    return cnt
+}
+
 func (p *parser) parse() {
     p.rlen = len(p.rbuf)
 
@@ -281,7 +297,6 @@ func (p *parser) parse() {
     - blockquote nesting
     - header right hand side decorations?
     */
-    var indentation uint8 = 0
     var startOfLine bool = true
     var startOfBlock bool = true
     for p.ri < p.rlen {
@@ -291,46 +306,22 @@ func (p *parser) parse() {
             p.write(p.rbuf[p.ri:])
             p.skip(len(p.rbuf[p.ri:]))
             break
-        } else {
-            p.write(p.rbuf[p.ri:p.ri+i])
-            p.skip(i)
         }
+        p.write(p.rbuf[p.ri:p.ri+i])
+        p.skip(i)
 
         startOfBlock = false
         startOfLine  = false
         if p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r' {
-            nls:=0
-            for ; p.ri < p.rlen; p.ri++ {
-                if p.rbuf[p.ri] == '\n' {
-                    nls++
-                    continue
-                } else if p.rbuf[p.ri] != '\r' {
-                    break
-                }
-            }
             startOfLine = true
-            if nls > 1 {
+            if p.skipAndCountNewlines() > 1 {
                 startOfBlock = true
                 p.closeAll()
             }
             if p.ri >= p.rlen {
                 break
             }
-            indentation = 0
-            if p.rbuf[p.ri] == '\t' || p.rbuf[p.ri] == ' ' {
-                cnt:=0
-                for ; p.ri < p.rlen; p.ri++ {
-                    if p.rbuf[p.ri] == '\t' {
-                        cnt += 4
-                        continue
-                    } else if p.rbuf[p.ri] == ' ' {
-                        cnt++
-                        continue
-                    }
-                    break
-                }
-                indentation = uint8(cnt/4)
-            }
+            p.indentation = p.skipAndCountTabs()
         }
 
         if startOfLine && p.hasTag(tagP) {
@@ -342,10 +333,10 @@ func (p *parser) parse() {
             cnt := p.count('#')
             p.skip(cnt)
             if cnt >= 1 && cnt <= 6 {
-                p.open(uint8(cnt), indentation)
+                p.open(uint8(cnt))
                 continue
             }
-            p.open(tagP, indentation)
+            p.open(tagP)
             p.write(p.rbuf[p.ri-cnt:p.ri])
         case startOfBlock && p.current() == '-':
             i:=p.count('-')
@@ -355,7 +346,7 @@ func (p *parser) parse() {
                 p.writeByte('\n')
                 continue
             } 
-            p.open(tagP, indentation)
+            p.open(tagP)
             p.write(p.rbuf[p.ri-i:p.ri])
         case startOfBlock && string(p.rbuf[p.ri:p.ri+3]) == "```":
             p.skip(3)
@@ -373,26 +364,26 @@ func (p *parser) parse() {
             p.write(tags[tagCode].close)
             p.write(tags[tagPre].close)
         case startOfBlock && isLetter(p.current()):
-            p.openParaCond(tagP, indentation)
+            p.openParaCond(tagP)
             p.writeByte(p.current())
             p.skip(1)
 
         case startOfLine && p.rbuf[p.ri] == '*' && p.peek() == ' ':
             p.skip(2)
             if !p.hasTag(tagLi) {
-                p.open(tagUl, indentation)
-                p.open(tagLi, indentation)
+                p.open(tagUl)
+                p.open(tagLi)
                 continue
             }
             level := p.getNestingLevel()
             switch {
-            case indentation > level:
-                p.open(tagUl, indentation)
-                p.open(tagLi, indentation)
-            case indentation == level:
+            case p.indentation > level:
+                p.open(tagUl)
+                p.open(tagLi)
+            case p.indentation == level:
                 p.write([]byte("</li><li>"))
-            case indentation < level:
-                for p.stack[p.si].level > indentation {
+            case p.indentation < level:
+                for p.stack[p.si].level > p.indentation {
                     p.close()
                 }
                 if p.hasTag(tagLi) {
@@ -400,14 +391,14 @@ func (p *parser) parse() {
                 }
             }
         case startOfLine && p.current() == '>':
-            p.handleBlockquote(indentation)
+            p.handleBlockquote()
 
         case p.current() == '*' && p.peek() == '*':
-            p.handleInlineTag(tagB, indentation)
+            p.handleInlineTag(tagB)
         case p.current() == '_' && p.peek() == '_':
-            p.handleInlineTag(tagI, indentation)
+            p.handleInlineTag(tagI)
         case p.current() == '~' && p.peek() == '~':
-            p.handleInlineTag(tagS, indentation)
+            p.handleInlineTag(tagS)
         case p.current() == '`':
             p.handleInlineCode()
         default:
@@ -426,9 +417,9 @@ func (p * parser) indexByte(b byte) int {
     return p.rlen - p.ri
 }
 
-func (p * parser) handleBlockquote(indentation uint8) {
+func (p * parser) handleBlockquote() {
     p.skip(1)
-    p.open(tagBq, indentation)
+    p.open(tagBq)
 }
 
 func (p * parser) handleInlineCode() {
@@ -440,9 +431,9 @@ func (p * parser) handleInlineCode() {
     p.skip(i+1)
 }
 
-func (p * parser) handleInlineTag(t uint8, indentation uint8) {
+func (p * parser) handleInlineTag(t uint8) {
     p.skip(2)
-    p.openOrClose(t, indentation)
+    p.openOrClose(t)
 }
 
 func isLetter(c byte) bool {
