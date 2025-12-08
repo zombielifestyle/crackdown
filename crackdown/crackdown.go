@@ -156,6 +156,18 @@ func (p *parser) write(by []byte) {
     p.wi += copy(p.wbuf[p.wi:], by)
 }
 
+// func (p *parser) writeEntityEscaped(s []byte) {
+//     for i:=0; i < len(s); i++ {
+//         if entities[s[i]] == 1 {
+//             p.wi += copy(p.wbuf[p.wi:], s[:i])
+//             p.wi += copy(p.wbuf[p.wi:], entitiesEnc[s[i]][1:entitiesEnc[s[i]][0]])
+//             s = s[i+1:]
+//             i = 0
+//         }
+//     }
+//     p.wi += copy(p.wbuf[p.wi:], s)
+// }
+
 func (p *parser) writeEntityEscaped(s []byte) {
     for _, c := range s {
         if entities[c] == 1 {
@@ -166,7 +178,7 @@ func (p *parser) writeEntityEscaped(s []byte) {
     }
 }
 
-func (p *parser) openParaCond(t uint8) {
+func (p *parser) openParaCond() {
     for i:= p.si; i > 0; i-- {
         if p.stack[i].t == tagP {
             return
@@ -186,12 +198,25 @@ func (p *parser) close() {
     p.si--
 }
 
+// func (p *parser) openOrClose(t uint8) {
+//     if p.hasTag(t) {
+//         p.close()
+//     } else {
+//         p.open(t)
+//     }
+// }
+
 func (p *parser) openOrClose(t uint8) {
-    if p.hasTag(t) {
-        p.close()
-    } else {
-        p.open(t)
+    for i:= p.si; i > 0; i-- {
+        if p.stack[i].t == t {
+            p.wi += copy(p.wbuf[p.wi:], tags[t].close)
+            p.si--
+            return
+        }
     }
+    p.si++
+    p.wi += copy(p.wbuf[p.wi:], tags[t].open)
+    p.stack[p.si] = tagNesting{t, p.indentation}
 }
 
 func (p *parser) closeAll() {
@@ -282,10 +307,10 @@ func (p * parser) skipAndCountNewlines() uint8 {
 func (p *parser) parse() {
     p.rlen = len(p.rbuf)
 
-    if bytes.Trim(p.rbuf, "\r\n\t ") == nil {
-        p.rbuf = p.rbuf[:0]
-        return
-    }
+    // if bytes.Trim(p.rbuf, "\r\n\t ") == nil {
+    //     p.rbuf = p.rbuf[:0]
+    //     return
+    // }
     /*
     todo:
     - links, references, footnotes
@@ -364,7 +389,7 @@ func (p *parser) parse() {
             p.write(tags[tagCode].close)
             p.write(tags[tagPre].close)
         case startOfBlock && isLetter(p.current()):
-            p.openParaCond(tagP)
+            p.openParaCond()
             p.writeByte(p.current())
             p.skip(1)
 
