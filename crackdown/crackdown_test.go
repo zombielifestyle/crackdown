@@ -135,7 +135,15 @@ func TestQuoteBasic(t *testing.T) {
     cases := []struct {
         in, want string
     }{
-        {"> bq", "<blockquote> bq</blockquote>"},
+        {"> a1", "<blockquote> a1</blockquote>"},
+        {"> a1\n> a2", "<blockquote> a1\n a2</blockquote>"},
+        {"> a1\na2", "<blockquote> a1\na2</blockquote>"},
+        {"> a1\n\n> a2", "<blockquote> a1</blockquote><blockquote> a2</blockquote>"},
+        {"> __italic__", "<blockquote> <i>italic</i></blockquote>"},
+        {"> n1\n>>n2", "<blockquote> n1\n<blockquote>n2</blockquote></blockquote>"},
+        {"> n1\n>>n2\n>>n2", "<blockquote> n1\n<blockquote>n2\nn2</blockquote></blockquote>"},
+        {"> n1\n>>n2\n>n1", "<blockquote> n1\n<blockquote>n2\n</blockquote>n1</blockquote>"},
+        {">>>n3", "<blockquote><blockquote><blockquote>n3</blockquote></blockquote></blockquote>"},
     }
     for _, c := range cases {
         got := convertString(c.in)
@@ -186,16 +194,16 @@ func TestUnorderedLists(t *testing.T) {
     }{
         // top level
         {"* ul", "<ul><li>ul</li></ul>"},
-        {"* a\n* b", "<ul><li>a</li><li>b</li></ul>"},
-        {"* a\n* b\n* c", "<ul><li>a</li><li>b</li><li>c</li></ul>"},
+        {"* a\n* b", "<ul><li>a\n</li><li>b</li></ul>"},
+        {"* a\n* b\n* c", "<ul><li>a\n</li><li>b\n</li><li>c</li></ul>"},
         // two lists
         {"* a\n\n* b", "<ul><li>a</li></ul><ul><li>b</li></ul>"},
         // nested
-        {"* a1\n\t* b", "<ul><li>a1<ul><li>b</li></ul></li></ul>"},
-        {"* a2\n\t* b\n\t\t* c", "<ul><li>a2<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>"},
-        {"* a3\n\t* b\n* c", "<ul><li>a3<ul><li>b</li></ul></li><li>c</li></ul>"},
-        {"* a4\n\t* b\n\t\t* c\n\t* d","<ul><li>a4<ul><li>b<ul><li>c</li></ul></li><li>d</li></ul></li></ul>"},
-        {"* a5\n\t* b\n\t\t* c\n* d", "<ul><li>a5<ul><li>b<ul><li>c</li></ul></li></ul></li><li>d</li></ul>"},
+        {"* a1\n\t* b", "<ul><li>a1\n<ul><li>b</li></ul></li></ul>"},
+        {"* a2\n\t* b\n\t\t* c", "<ul><li>a2\n<ul><li>b\n<ul><li>c</li></ul></li></ul></li></ul>"},
+        {"* a3\n\t* b\n* c", "<ul><li>a3\n<ul><li>b\n</li></ul></li><li>c</li></ul>"},
+        {"* a4\n\t* b\n\t\t* c\n\t* d","<ul><li>a4\n<ul><li>b\n<ul><li>c\n</li></ul></li><li>d</li></ul></li></ul>"},
+        {"* a5\n\t* b\n\t\t* c\n* d", "<ul><li>a5\n<ul><li>b\n<ul><li>c\n</li></ul></li></ul></li><li>d</li></ul>"},
     }
     for _, c := range cases {
         got := convertString(c.in)

@@ -184,13 +184,14 @@ func (p *parser) writeEntityEscaped(s []byte) {
     }
 }
 
-func (p *parser) openParaCond(t uint8) {
+func (p *parser) openTagCond(t uint8) bool {
     for i:= p.si; i > 0; i-- {
-        if p.stack[i].t == tagP {
-            return
+        if p.stack[i].t == t {
+            return false
         }
     }
-    p.open(tagP)
+    p.open(t)
+    return true
 }
 
 func (p *parser) open(t uint8) {
@@ -238,6 +239,15 @@ func (p *parser) hasTag(t uint8) bool {
         }
     }
     return false
+}
+
+func (p *parser) getTag(t uint8) tagNesting {
+    for i:= p.si; i > 0; i-- {
+        if p.stack[i].t == t {
+            return p.stack[i]
+        }
+    }
+    return tagNesting{0,0}
 }
 
 func (p *parser) getNestingLevel() uint8 {
@@ -311,10 +321,6 @@ func (p * parser) skipAndCountNewlines() uint8 {
 func (p *parser) parse() {
     p.rlen = len(p.rbuf)
 
-    // if bytes.Trim(p.rbuf, "\r\n\t ") == nil {
-    //     p.rbuf = p.rbuf[:0]
-    //     return
-    // }
     /*
     todo:
     - links, references, footnotes
@@ -323,8 +329,6 @@ func (p *parser) parse() {
     - escaping
     - images
     - todo more flexible rulers
-    - blockquote nesting
-    - header right hand side decorations?
     */
     var startOfLine bool = true
     var startOfBlock bool = true
@@ -346,15 +350,13 @@ func (p *parser) parse() {
             if p.skipAndCountNewlines() > 1 {
                 startOfBlock = true
                 p.closeAll()
+            } else {
+                p.writeByte('\n')
             }
             if p.ri >= p.rlen {
                 break
             }
             p.indentation = p.skipAndCountTabs()
-        }
-
-        if startOfLine && p.hasTag(tagP) {
-            p.writeByte('\n')
         }
 
         current := p.current()
@@ -395,7 +397,7 @@ func (p *parser) parse() {
             p.write(tags[tagCode].close)
             p.write(tags[tagPre].close)
         case startOfBlock && isLetter(current):
-            p.openParaCond(tagP)
+            p.openTagCond(tagP)
             p.writeByte(p.current())
             p.skip(1)
 
@@ -449,8 +451,22 @@ func (p * parser) indexByte(b byte) int {
 }
 
 func (p * parser) handleBlockquote() {
-    p.skip(1)
-    p.open(tagBq)
+    level := int(p.getTag(tagBq).level)
+    cnt := p.count('>')
+    p.skip(cnt)
+    switch {
+    case level < cnt:
+        for i:= level; i < cnt; i++ {
+            p.si++
+            p.write(tags[tagBq].open)
+            p.stack[p.si] = tagNesting{tagBq, uint8(i + 1)}
+        }
+    case level > cnt:
+        for int(p.stack[p.si].level) > cnt {
+            p.close()
+        }
+    }
+
 }
 
 func (p * parser) handleInlineCode() {
