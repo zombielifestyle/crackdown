@@ -1,0 +1,99 @@
+# Crackdown Documentation
+
+## Escaping
+
+todo 
+
+## Block Elements
+
+Block elements can span multiple lines and are close by two newlines or at the end of file.
+
+### Paragraph
+
+A paragraph is wrapped in a `<p>` tag. The paragraph should start with an alphabetic ASCII character and end with two newlines.
+
+### Headers
+
+Headers start with `#`, with the count being the html header size i.e. `<h1>`.
+
+### Lists
+
+Lists are created with their marker followed by one space. They can be indented by either a tab `\t` or four spaces.
+
+#### Unordered Lists
+
+An unordered list starts with `*`.
+
+* item 1
+* item 2
+	* nested level 2
+		* nested level 3
+	* nested level 2
+* item 3
+
+---
+
+* t
+	* nested level 2
+		* nested level 3
+	* nested level 2
+
+
+#### Ordered List
+
+TODO
+
+### Code blocks
+
+There are only fenced code blocks starting and ending with a line of of backticks.
+
+```
+// example code block
+fmt.Printf("%q", "hi!!")
+```
+
+
+### Blockquote
+
+Blockquotes start with an `>` on the paragraph or on each line, and are closed with two newlines.
+
+> Example blockquote with a single `>`
+spanning multiple lines
+
+### Horizontal Rulers
+
+Rulers are three or more `-` characters in a line without any spaces.
+
+---
+
+## Inline Markup
+
+### Code
+
+Inline `code` is enclosed in single backticks.
+
+### Italic
+
+An __italic__ sequence of words are enclosed with `__`.
+
+### Bold
+
+A **bold** sequence of words are enclosed with `**`.
+
+### Strikethrough
+
+A ~~strikethrough~~ sequence of words are enclosed with `~~`.
+
+### Nesting Markup and Auto closing
+
+A test __paragraph__ with **some** ~~ugly~~ markup.
+Even __nesting **will ~~break~~ work** fine__.
+Inline __markup **will auto close at the end of a block.
+
+### Links
+
+todo
+
+### Images
+
+todo

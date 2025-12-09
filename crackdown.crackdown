@@ -4,21 +4,26 @@
 
 todo 
 
+
 ## Block Elements
 
 Block elements can span multiple lines and are close by two newlines or at the end of file.
+
 
 ### Paragraph
 
 A paragraph is wrapped in a `<p>` tag. The paragraph should start with an alphabetic ASCII character and end with two newlines.
 
+
 ### Headers
 
 Headers start with `#`, with the count being the html header size i.e. `<h1>`.
 
+
 ### Lists
 
 Lists are created with their marker followed by one space. They can be indented by either a tab `\t` or four spaces.
+
 
 #### Unordered Lists
 
@@ -33,7 +38,7 @@ An unordered list starts with `*`.
 
 ---
 
-* t
+* level 1
 	* nested level 2
 		* nested level 3
 	* nested level 2
@@ -42,6 +47,7 @@ An unordered list starts with `*`.
 #### Ordered List
 
 TODO
+
 
 ### Code blocks
 
@@ -55,16 +61,23 @@ fmt.Printf("%q", "hi!!")
 
 ### Blockquote
 
-Blockquotes start with an `>` on the paragraph or on each line, and are closed with two newlines.
+Blockquotes start with an `>` on the paragraph or on each line, and are closed with two newlines. They can be nested with multiple `>` prefixed
 
 > Example blockquote with a single `>`
 spanning multiple lines
+
+> first quote
+>> second quote
+>>> third quote
+> **first** quote again
+
 
 ### Horizontal Rulers
 
 Rulers are three or more `-` characters in a line without any spaces.
 
 ---
+
 
 ## Inline Markup
 
