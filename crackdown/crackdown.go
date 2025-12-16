@@ -24,8 +24,6 @@ type parser struct {
     rbuf []byte
     wbuf []byte
     ri int
-    rlen int
-    wi uint
     stack *stack
     si uint8
     indentation uint8
@@ -106,13 +104,12 @@ func init() {
     if false {
         fmt.Print("")
     }
-    writeBuf.Grow(1024*3)
 }
 
 func ConvertBytes(rbuf []byte, wbuf []byte) []byte {
-    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,sstack,0,0}
+    p := &parser{rbuf,wbuf[:0],0,sstack,0,0}
     p.parse()
-    return wbuf[:p.wi]
+    return p.wbuf
 }
 
 func ConvertString(s *strings.Reader) []byte {
@@ -127,9 +124,9 @@ func ConvertString(s *strings.Reader) []byte {
     writeBuf.Grow(s.Len()*2)
     wbuf := writeBuf.Bytes()
 
-    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0,0}
+    p := &parser{rbuf,wbuf[:0],0,&stack{},0,0}
     p.parse()
-    return wbuf[:p.wi]
+    return p.wbuf
 }
 
 func ConvertFile(f *os.File) []byte {
@@ -149,73 +146,40 @@ func ConvertFile(f *os.File) []byte {
     writeBuf.Grow(int(fi.Size() * 2))
     wbuf := writeBuf.Bytes()
 
-    p := &parser{rbuf,wbuf[0:cap(wbuf)],0,0,0,&stack{},0,0}
+    p := &parser{rbuf,wbuf[:0],0,&stack{},0,0}
     p.parse()
-    return wbuf[:p.wi]
+    return p.wbuf
 }
 
-func (p *parser) writeByte(by byte) {
-    if  p.wi < uint(len(p.wbuf)) {
-        p.wbuf[p.wi] = by
-        p.wi++
+func (p *parser) writeByte(c byte) {
+    p.wbuf = append(p.wbuf, c)
+}
+
+func (p *parser) write(s []byte) {
+    p.wbuf = append(p.wbuf, s...)
+}
+
+func (p *parser) writeRange(i, j int) {
+    if i >= 0 && j < len(p.rbuf) && i < j {
+        p.write(p.rbuf[i:j])
     }
 }
 
-func (p *parser) write(by []byte) {
-    if  p.wi < uint(len(p.wbuf)) {
-        p.wi += uint(copy(p.wbuf[p.wi:], by))
-    }
-}
-
-// func (p *parser) writeEntityEscaped(n int) {
-//     s:=p.rbuf[p.ri:p.ri+n]
-//     for i:=uint(0); i < uint(len(s)); i++ {
-//         if entities[s[i]] == 1 {
-//             if p.wi < uint(len(p.wbuf)) {
-//                 p.wi += uint(copy(p.wbuf[p.wi:], s[:i]))
-//             }
-//             if p.wi < uint(len(p.wbuf)) {
-//                 p.wi += uint(copy(p.wbuf[p.wi:], entitiesEnc[s[i]]))
-//             }
-//             s = s[i+1:]
-//             i = 0
-//         }
-//     }
-//     if p.wi < uint(len(p.wbuf)) {
-//         p.wi += uint(copy(p.wbuf[p.wi:], s))
-//     }
-// }
-
-var wb []byte =  make([]byte, 0, 512)
 func (p *parser) writeEntityEscaped(s []byte) {
-    if len(s) == 1 && p.wi < uint(len(p.wbuf)) {
-        if entities[s[0]] != 1 {
-            p.wi += uint(copy(p.wbuf[p.wi:], s))
-        } else {
-            p.wi += uint(copy(p.wbuf[p.wi:], entitiesEnc[s[0]]))
-        }
-        return
-    }
-    wb:=wb[:0:cap(wb)]
     o:=uint(0)
-    m:=uint(len(s))
-    for i:=uint(0); i < m; i++ {
+    for i:=uint(0); i < uint(len(s)); i++ {
         if entities[s[i]] == 0 {
             continue
         }
         if o < i {
-            wb = append(append(wb, s[o:i]...), entitiesEnc[s[i]]...)
+            p.wbuf = append(append(p.wbuf, s[o:i]...), entitiesEnc[s[i]]...)
         } else {
-            wb = append(wb, entitiesEnc[s[i]]...)
+            p.wbuf = append(p.wbuf, entitiesEnc[s[i]]...)
         }
         o = i+1
     }
-    if o < m && cap(wb) >= len(s[o:]) {
-        wb = wb[0:len(s[o:])]
-        o+=uint(copy(wb, s[o:]))
-    }
-    if p.wi < uint(len(p.wbuf)) {
-        p.wi += uint(copy(p.wbuf[p.wi:], wb))
+    if o < uint(len(s)) {
+        p.wbuf = append(p.wbuf, s[o:]...)
     }
 }
 
@@ -231,29 +195,25 @@ func (p *parser) openTagCond(t uint8) bool {
 
 func (p *parser) open(t uint8) {
     p.si++
-    if p.wi < uint(len(p.wbuf)) && len(p.wbuf[p.wi:]) > len(tags[t].open) {
-        p.wi += uint(copy(p.wbuf[p.wi:], tags[t].open))
-    }
+    p.write(tags[t].open)
     p.stack[p.si] = tagNesting{t, p.indentation}
 }
 
 func (p *parser) close() {
-    if  p.wi < uint(len(p.wbuf)) && len(p.wbuf[p.wi:]) > len(tags[p.stack[p.si].t].close) {
-        p.wi += uint(copy(p.wbuf[p.wi:], tags[p.stack[p.si].t].close))
-    }
+    p.write(tags[p.stack[p.si].t].close)
     p.si--
 }
 
 func (p *parser) openOrClose(t uint8) {
     for i:= p.si; i > 0; i-- {
         if p.stack[i].t == t {
-            p.wi += uint(copy(p.wbuf[p.wi:], tags[t].close))
+            p.wbuf = append(p.wbuf, tags[t].close...)
             p.si--
             return
         }
     }
     p.si++
-    p.wi += uint(copy(p.wbuf[p.wi:], tags[t].open))
+    p.wbuf = append(p.wbuf, tags[t].open...)
     p.stack[p.si] = tagNesting{t, p.indentation}
 }
 
@@ -278,14 +238,11 @@ func (p *parser) getTag(t uint8) tagNesting {
             return p.stack[i]
         }
     }
-    return tagNesting{0,0}
+    return p.stack[0]
 }
 
 func (p *parser) getNestingLevel() uint8 {
-    if p.si > 0 {
-        return p.stack[p.si].level
-    }
-    return 0
+    return p.stack[p.si].level
 }
 
 func (p *parser) current() byte {
@@ -296,10 +253,17 @@ func (p *parser) current() byte {
 }
 
 func (p *parser) peek() byte {
-    if p.ri >= 0 && p.ri < len(p.rbuf) && p.ri+1 < len(p.rbuf) {
-        return p.rbuf[p.ri+1]
+    if i:=p.ri+1; i >= 0 && i < len(p.rbuf){
+        return p.rbuf[i]
     }
     return 0
+}
+
+func (p *parser) peekSlice(n int) string {
+    if s,e:=p.ri,p.ri+n; s > 0 && e < len(p.rbuf) && s < e {
+        return string(p.rbuf[s:e])
+    }
+    return ""
 }
 
 func (p *parser) skip(n int) {
@@ -308,11 +272,14 @@ func (p *parser) skip(n int) {
 
 func (p *parser) count(ch byte) int {
     i:=p.ri
-    for ; i>=0 && i < len(p.rbuf) && p.rbuf[i] == ch; i++ {}
+    for ; i >= 0 && i < len(p.rbuf) && p.rbuf[i] == ch; i++ {}
     return i - p.ri
 }
 
 func (p *parser) indexSyntax() int {
+    if p.ri < 0 || p.ri > len(p.rbuf) {
+        return -1
+    }
     i:=uint(0)
     s:=p.rbuf[p.ri:]
     k:=uint(len(s))
@@ -353,12 +320,6 @@ func (p *parser) eol() bool {
 }
 
 func (p *parser) skipAndCountTabs() uint8 {
-    if p.ri < 0 || p.ri >= len(p.rbuf) {
-        return 0
-    }
-    if p.rbuf[p.ri] != '\t' && p.rbuf[p.ri] != ' ' {
-        return 0
-    }
     cnt:=uint8(0)
     for ; p.ri >= 0 && p.ri < len(p.rbuf) && (p.rbuf[p.ri] == '\t' || p.rbuf[p.ri] == ' '); p.ri++ {
         cnt += p.rbuf[p.ri]&1 * 3 + 1
@@ -368,21 +329,13 @@ func (p *parser) skipAndCountTabs() uint8 {
 
 func (p *parser) skipAndCountNewlines() uint8 {
     cnt:=uint8(0)
-    for ; p.ri>=0 && p.ri < len(p.rbuf) && (p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r'); p.ri++ {
+    for ; p.ri >= 0 && p.ri < len(p.rbuf) && (p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r'); p.ri++ {
         cnt += p.rbuf[p.ri]>>1&1
     }
     return cnt
 }
 
-func (p *parser) writeRange(i, j int) {
-    if  p.wi < uint(len(p.wbuf)) && j < len(p.rbuf) && i < j && j >=0 && i >=0 {
-        p.wi += uint(copy(p.wbuf[p.wi:], p.rbuf[i:j]))
-    }
-}
-
 func (p *parser) parse() {
-    p.rlen = len(p.rbuf)
-
     /*
     todo:
     - links, references, footnotes
@@ -394,22 +347,20 @@ func (p *parser) parse() {
     */
     var startOfLine bool = true
     var startOfBlock bool = true
-    for p.ri < p.rlen {
+    for p.ri < len(p.rbuf) {
 
         i:=p.indexSyntax()
-        if i < 0 || p.ri + i >= p.rlen {
-            if p.ri >= 0 && p.ri < len(p.rbuf) {
-                p.write(p.rbuf[p.ri:])
-                p.skip(len(p.rbuf))
-            }
+        if i < 0 || p.ri + i >= len(p.rbuf) {
             break
         }
         p.writeRange(p.ri, p.ri+i)
         p.skip(i)
 
+        current := p.current()
+
         startOfBlock = false
         startOfLine  = false
-        if p.ri >= 0 && p.ri < len(p.rbuf) && (p.rbuf[p.ri] == '\n' || p.rbuf[p.ri] == '\r') {
+        if current == '\n' || current == '\r' {
             startOfLine = true
             if p.skipAndCountNewlines() > 1 {
                 startOfBlock = true
@@ -417,13 +368,13 @@ func (p *parser) parse() {
             } else {
                 p.writeByte('\n')
             }
-            if p.ri >= p.rlen {
+            if p.ri >= len(p.rbuf) {
                 break
             }
             p.indentation = p.skipAndCountTabs()
         }
 
-        current := p.current()
+        current = p.current()
 
         switch {
         case startOfBlock && current == '#':
@@ -445,21 +396,23 @@ func (p *parser) parse() {
             } 
             p.open(tagP)
             p.writeRange(p.ri-i, p.ri)
-        case startOfBlock && string(p.rbuf[p.ri:p.ri+3]) == "```":
+        case startOfBlock && p.peekSlice(3) == "```":
             p.skip(3)
             if p.current() == '\n' {
                 p.skip(1)
             }
             p.write(tags[tagPre].open)
             p.write(tags[tagCode].open)
-            i := bytes.Index(p.rbuf[p.ri:], []byte("```"))
-            if i < 0 {
-                i = p.rlen - p.ri
+            s:=p.bytes()
+            if i:=bytes.Index(s, []byte("```")); i > -1 && i < len(s) {
+                p.writeEntityEscaped(s[:i])
+                p.skip(i+3)
+                p.write(tags[tagCode].close)
+                p.write(tags[tagPre].close)
+                continue
             }
-            if o, m:= uint(p.ri+i), uint(len(p.rbuf)); o <= m && uint(p.ri) < o {
-                p.writeEntityEscaped(p.rbuf[p.ri:o])
-            }
-            p.skip(i+3)
+            p.writeEntityEscaped(s)
+            p.skip(len(s))
             p.write(tags[tagCode].close)
             p.write(tags[tagPre].close)
         case startOfBlock && isLetter(current):
@@ -503,19 +456,17 @@ func (p *parser) parse() {
             p.openOrClose(tagS)
         case current == '`':
             p.skip(1)
-            if  p.wi < uint(len(p.wbuf)) {
-                p.wi += uint(copy(p.wbuf[p.wi:], tags[tagCode].open))
+            p.write(tags[tagCode].open)
+            s:=p.bytes()
+            if i:=bytes.IndexByte(s, '`'); i > -1 && i < len(s) {
+                p.writeEntityEscaped(s[:i])
+                p.write(tags[tagCode].close)
+                p.skip(i+1)
+                continue
             }
-            i:=bytes.IndexByte(p.rbuf[p.ri:], '`')
-            if i < 0 {
-                i = p.rlen - p.ri
-            }
-            p.writeEntityEscaped(p.rbuf[p.ri:p.ri+i])
-            if  p.wi < uint(len(p.wbuf)) {
-                p.wi += uint(copy(p.wbuf[p.wi:], tags[tagCode].close))
-            }
-            // p.write(tags[tagCode].close)
-            p.skip(i+1)
+            p.writeEntityEscaped(s)
+            p.skip(len(s))
+            p.write(tags[tagCode].close)
 
         default:
             p.writeByte(current)
@@ -523,14 +474,17 @@ func (p *parser) parse() {
         }
 
     }
+    if p.ri >= 0 && p.ri < len(p.rbuf) {
+        p.write(p.rbuf[p.ri:])
+    }
     p.closeAll()
 }
 
-func (p *parser) indexByte(b byte) int {
-    if i:=bytes.IndexByte(p.rbuf[p.ri:], b); i > -1 {
-        return i
-    } 
-    return p.rlen - p.ri
+func (p *parser) bytes() []byte {
+    if p.ri >= 0 && p.ri < len(p.rbuf) {
+        return p.rbuf[p.ri:]
+    }
+    return p.rbuf[:]
 }
 
 func (p *parser) handleBlockquote() {
