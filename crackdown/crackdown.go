@@ -277,15 +277,14 @@ func (p *parser) count(ch byte) int {
 }
 
 func (p *parser) indexSyntax() int {
-    if p.ri < 0 || p.ri > len(p.rbuf) {
+    if p.ri < 0 || p.ri >= len(p.rbuf) {
         return -1
     }
     i:=uint(0)
     s:=p.rbuf[p.ri:]
-    k:=uint(len(s))
-    for ; i < k && i+8 < k; i+=8 {
-        if syntax[s[i+0]] == 1 {
-            return int(i+0)
+    for ; uint(len(s)) > 7 ; i+=8 {
+        if syntax[s[0]] == 1 {
+            return int(i)
         } else if syntax[s[1]] == 1 {
             return int(i+1)
         } else if syntax[s[2]] == 1 {
@@ -301,8 +300,9 @@ func (p *parser) indexSyntax() int {
         } else if syntax[s[7]] == 1 {
             return int(i+7)
         }
+        s = s[8:]
     }
-    for ; i < k; i++ {
+    for i:=0; i < len(s); i++ {
         if syntax[s[i]] == 1 {
             return int(i)
         }
